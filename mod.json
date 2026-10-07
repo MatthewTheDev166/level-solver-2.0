@@ -8,6 +8,6 @@
 	"version": "v2.0.0",
 	"developer": "Matthew",
 	"description": "Autonomous Level Solver with Dear ImGui overlay and Grounded Swarm Engine.",
-	"dependencies": []
+	"dependencies": {}
 }
 
