@@ -23,5 +23,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LevelSolver2-Windows
-          path: ${{ steps.build.outputs.output }}/*.geode
+          path: |
+            ${{ steps.build.outputs.build-output }}/*.geode
+            output/*.geode
+            build/**/*.geode
 
