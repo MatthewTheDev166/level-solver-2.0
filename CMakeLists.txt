@@ -33,7 +33,7 @@ file(GLOB_RECURSE HEADERS CONFIGURE_DEPENDS "src/*.hpp")
 add_library(${PROJECT_NAME} SHARED ${SOURCES} ${HEADERS})
 
 # Link dependencies
-target_link_libraries(${PROJECT_NAME} PRIVATE imgui-cocos)
+target_link_libraries(${PROJECT_NAME} imgui-cocos)
 
 setup_geode_mod(${PROJECT_NAME})
 

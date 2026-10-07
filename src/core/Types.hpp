@@ -61,15 +61,12 @@ struct PlayerSnapshot {
         player->m_isBird = isBird;
         player->m_isBall = isBall;
         player->m_isDart = isDart;
-        player->m_isRobot = robot();
+        player->m_isRobot = isRobot;
         player->m_isSpider = isSpider;
         player->m_isSwing = isSwing;
         player->m_isDashing = isDashing;
         player->m_playerSpeed = playerSpeed;
     }
-
-private:
-    bool robot() const { return isRobot; }
 };
 
 struct BotCandidate {
