@@ -3,6 +3,8 @@
 #include "../replay/MacroManager.hpp"
 #include <algorithm>
 
+using namespace geode::prelude;
+
 void SwarmSolver::onLevelEntered(PlayLayer* playLayer) {
     m_playLayer = playLayer;
     m_inLevel = true;
@@ -31,7 +33,7 @@ void SwarmSolver::calculateTrueLevelLength() {
     float maxObjX = 0.0f;
     if (m_playLayer && m_playLayer->m_objects) {
         for (unsigned int i = 0; i < m_playLayer->m_objects->count(); ++i) {
-            if (auto obj = typeinfo_cast<GameObject*>(m_playLayer->m_objects->objectAtIndex(i))) {
+            if (auto obj = geode::cast::typeinfo_cast<GameObject*>(m_playLayer->m_objects->objectAtIndex(i))) {
                 float right = obj->getPositionX() + 90.0f;
                 if (right > maxObjX) {
                     maxObjX = right;
