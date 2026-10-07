@@ -1,0 +1,13 @@
+{
+	"geode": "5.10.1",
+	"gd": {
+		"win": "2.2081"
+	},
+	"id": "matthew.level-solver-2.0",
+	"name": "Level Solver 2.0",
+	"version": "v2.0.0",
+	"developer": "Matthew",
+	"description": "Autonomous Level Solver with Dear ImGui overlay and Grounded Swarm Engine.",
+	"dependencies": []
+}
+
