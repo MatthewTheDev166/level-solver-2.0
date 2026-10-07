@@ -15,7 +15,7 @@ if (NOT COMMAND CPMAddPackage)
 endif()
 
 # Include gd-imgui-cocos
-CPMAddPackage("gh:matcool/gd-imgui-cocos#v1.4.3")
+CPMAddPackage("gh:matcool/gd-imgui-cocos#b93f08ccef778a53ebba09b20c347f6a63980119")
 
 # Find Geode SDK
 find_package(Geode REQUIRED)
