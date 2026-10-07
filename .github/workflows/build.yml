@@ -7,36 +7,21 @@ on:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - name: Windows
-            os: windows-2022
-            extra-flags: ""
-
-    name: ${{ matrix.config.name }}
-    runs-on: ${{ matrix.config.os }}
+    name: Windows
+    runs-on: windows-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - uses: actions/checkout@v4
 
-      - name: Setup Geode CLI
-        uses: geode-sdk/setup-geode@v3
-
-      - name: Build Mod
-        uses: geode-sdk/build-geode-mod@v3
+      - name: Build the mod
+        uses: geode-sdk/build-geode-mod@main
+        id: build
         with:
-          bindings: "geode-sdk/bindings"
-          combine: true
-          target: ${{ matrix.config.name }}
-          extra-flags: ${{ matrix.config.extra-flags }}
+          combine: false
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: LevelSolver2-Windows
-          path: build/*.geode
+          path: ${{ steps.build.outputs.output }}/*.geode
+
