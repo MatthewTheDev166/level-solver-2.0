@@ -119,11 +119,17 @@ struct BotCandidate {
     uint32_t id = 0;
     std::vector<Action> actions;
     float finalX = 0.0f;
+    cocos2d::CCPoint finalPos = {0.0f, 0.0f};
+    PlayerSnapshot p1Snapshot;
+    PlayerSnapshot p2Snapshot;
+    bool hasPlayer2 = false;
     uint32_t deathTick = 0;
     bool died = false;
     bool completed = false;
     bool landedSafely = false;
+    float clearance = 0.0f;
     float fitnessScore = 0.0f;
+    uint32_t actualEndTick = 0;
 };
 
 struct AnchorPoint {

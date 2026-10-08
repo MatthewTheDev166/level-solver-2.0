@@ -31,8 +31,9 @@ void MacroManager::onLevelExited() {
 
 void MacroManager::setMacro(const std::vector<Action>& actions) {
     m_actions = actions;
-    std::sort(m_actions.begin(), m_actions.end(), [](const Action& a, const Action& b) {
-        return a.tick < b.tick;
+    std::stable_sort(m_actions.begin(), m_actions.end(), [](const Action& a, const Action& b) {
+        if (a.tick != b.tick) return a.tick < b.tick;
+        return !a.down && b.down;
     });
     m_currentActionIndex = 0;
     m_replayTick = 0;
@@ -127,6 +128,26 @@ void MacroManager::startReplay(GJGameLevel* level) {
         return;
     }
 
+    if (level) {
+        if (level->isPlatformer()) {
+            geode::Notification::create("Platformer levels are not supported by Level Solver.", geode::NotificationIcon::Warning)->show();
+            return;
+        }
+        if (level->m_twoPlayerMode) {
+            geode::Notification::create("2-Player levels are not supported by Level Solver.", geode::NotificationIcon::Warning)->show();
+            return;
+        }
+    } else if (m_playLayer && m_playLayer->m_level) {
+        if (m_playLayer->m_level->isPlatformer()) {
+            geode::Notification::create("Platformer levels are not supported by Level Solver.", geode::NotificationIcon::Warning)->show();
+            return;
+        }
+        if (m_playLayer->m_level->m_twoPlayerMode) {
+            geode::Notification::create("2-Player levels are not supported by Level Solver.", geode::NotificationIcon::Warning)->show();
+            return;
+        }
+    }
+
     m_replayActive = true;
     m_currentActionIndex = 0;
     m_replayTick = 0;
@@ -168,7 +189,7 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
     if (playLayer->m_hasCompletedLevel) {
         stopReplay();
         geode::Notification::create("Replay Complete!", geode::NotificationIcon::Success)->show();
-    } else if (m_currentActionIndex >= m_actions.size() && playLayer->m_player1 && playLayer->m_player1->m_isDead) {
+    } else if (playLayer->m_player1 && playLayer->m_player1->m_isDead) {
         stopReplay();
     }
 }
@@ -218,14 +239,15 @@ std::string MacroManager::exportActiveMacro(GJGameLevel* level) {
         const auto& act = m_actions[i];
         ss << "    { \"frame\": " << act.tick
            << ", \"button\": " << act.button
+           << ", \"btn\": " << act.button
            << ", \"player2\": " << (act.player2 ? "true" : "false")
+           << ", \"p2\": " << (act.player2 ? "true" : "false")
            << ", \"down\": " << (act.down ? "true" : "false") << " }";
         if (i + 1 < m_actions.size()) {
             ss << ",";
         }
         ss << "\n";
     }
-
     ss << "  ]\n";
     ss << "}\n";
 

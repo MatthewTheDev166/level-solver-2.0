@@ -24,6 +24,7 @@ public:
     bool isSolving() const { return m_isSolving; }
     bool isCompleted() const { return m_isCompleted; }
     bool isHeadlessSimulating() const { return m_headlessSimulating; }
+    PlayLayer* getHeadlessPlayLayer() const { return m_headlessPlayLayer; }
 
     const SwarmTelemetry& getTelemetry() const { return m_telemetry; }
     const std::vector<Action>& getResolvedMacro() const { return m_verifiedPrefix; }
@@ -77,6 +78,7 @@ private:
     std::vector<BotCandidate> m_activeCandidates;
     size_t m_currentCandidateIdx = 0;
     std::vector<BotCandidate> m_currentWaveSurvivors;
+    std::vector<BotCandidate> m_currentWaveFailures;
     AnchorPoint m_waveAnchor;
 
     SwarmTelemetry m_telemetry;

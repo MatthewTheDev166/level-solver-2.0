@@ -47,6 +47,15 @@ void SolverOverlay::setVisible(bool visible) {
 }
 
 void SolverOverlay::render() {
+    // Advance headless swarm simulation batch
+    if (SwarmSolver::get().isSolving()) {
+        if (!MenuManager::get().isInAllowedMenu()) {
+            SwarmSolver::get().pause();
+        } else {
+            SwarmSolver::get().stepSwarmBatch(SwarmSolver::get().getTimeBudgetMs());
+        }
+    }
+
     if (!s_showOverlay) return;
 
     // Guard: Only render when inside one of the 3 allowed menus
@@ -60,11 +69,6 @@ void SolverOverlay::render() {
     PlatformToolbox::showCursor();
     if (auto view = cocos2d::CCEGLView::sharedOpenGLView()) {
         view->showCursor(true);
-    }
-
-    // Advance headless swarm simulation batch
-    if (SwarmSolver::get().isSolving()) {
-        SwarmSolver::get().stepSwarmBatch(SwarmSolver::get().getTimeBudgetMs());
     }
 
     auto levelInfo = MenuManager::get().getActiveLevelInfo();

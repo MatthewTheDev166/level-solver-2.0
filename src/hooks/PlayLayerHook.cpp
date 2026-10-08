@@ -25,7 +25,8 @@ class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
         if (!isHalfTick && MacroManager::get().isReplayActive()) {
             if (auto pl = typeinfo_cast<PlayLayer*>(this)) {
-                if (!pl->m_inResetDelay && pl->m_started && !pl->m_playerDied && pl->m_player1 && !pl->m_player1->m_isDead) {
+                if (pl != SwarmSolver::get().getHeadlessPlayLayer() &&
+                    !pl->m_inResetDelay && pl->m_started && !pl->m_playerDied && pl->m_player1 && !pl->m_player1->m_isDead) {
                     MacroManager::get().stepReplay(pl);
                 }
             }
@@ -48,7 +49,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
 
-        if (SwarmSolver::get().isHeadlessSimulating()) {
+        if (SwarmSolver::get().isHeadlessSimulating() || this == SwarmSolver::get().getHeadlessPlayLayer()) {
             // Do not register headless simulation layers as active gameplay PlayLayer
             return true;
         }
@@ -89,7 +90,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
-        if (SwarmSolver::get().isHeadlessSimulating()) {
+        if (SwarmSolver::get().isHeadlessSimulating() || this == SwarmSolver::get().getHeadlessPlayLayer()) {
             // 1. Ignore spawn anti-cheat spike
             if (object && (object == this->m_anticheatSpike || (object->m_objectID == 8 && object->getPositionX() <= 30.0f))) {
                 return;
@@ -107,7 +108,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void playEndAnimationToPos(cocos2d::CCPoint position) {
-        if (SwarmSolver::get().isHeadlessSimulating()) {
+        if (SwarmSolver::get().isHeadlessSimulating() || this == SwarmSolver::get().getHeadlessPlayLayer()) {
             this->m_hasCompletedLevel = true;
             return;
         }
@@ -115,7 +116,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void playPlatformerEndAnimationToPos(cocos2d::CCPoint position, bool instant) {
-        if (SwarmSolver::get().isHeadlessSimulating()) {
+        if (SwarmSolver::get().isHeadlessSimulating() || this == SwarmSolver::get().getHeadlessPlayLayer()) {
             this->m_hasCompletedLevel = true;
             return;
         }
@@ -123,7 +124,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void checkForEnd() {
-        if (SwarmSolver::get().isHeadlessSimulating()) {
+        if (SwarmSolver::get().isHeadlessSimulating() || this == SwarmSolver::get().getHeadlessPlayLayer()) {
             if (this->m_player1 && this->m_player1->getPositionX() >= this->getEndPosition().x - 10.0f) {
                 this->m_hasCompletedLevel = true;
                 return;

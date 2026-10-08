@@ -47,6 +47,7 @@ void SwarmSolver::reset() {
     m_anchors.clear();
     m_activeCandidates.clear();
     m_currentWaveSurvivors.clear();
+    m_currentWaveFailures.clear();
     m_currentCandidateIdx = 0;
     m_telemetry = SwarmTelemetry{};
 }
@@ -129,6 +130,7 @@ void SwarmSolver::start(GJGameLevel* level) {
     m_headlessScene = cocos2d::CCScene::create();
     m_headlessScene->retain();
 
+    m_headlessSimulating = true;
     m_headlessPlayLayer = PlayLayer::create(level, false, false);
     if (!m_headlessPlayLayer) {
         cleanupHeadless();
@@ -140,7 +142,7 @@ void SwarmSolver::start(GJGameLevel* level) {
     m_headlessPlayLayer->retain();
     m_headlessScene->addChild(m_headlessPlayLayer);
     m_headlessPlayLayer->m_isSilent = true;
-    m_headlessPlayLayer->m_isPracticeMode = true;
+    m_headlessPlayLayer->m_isPracticeMode = false;
     m_headlessPlayLayer->setKeypadEnabled(false);
     m_headlessPlayLayer->setTouchEnabled(false);
     m_headlessPlayLayer->setMouseEnabled(false);
@@ -231,97 +233,325 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
         swarm.push_back(std::move(b));
     };
 
-    // 1. Idle (no input)
-    addBot({ { startTick, false, 1, false } });
+    // Mode and speed detection from latest verified anchor
+    bool isDart = false;
+    bool isShip = false;
+    bool isBird = false;
+    bool isBall = false;
+    bool isRobot = false;
+    bool isSpider = false;
+    bool isSwing = false;
+    bool isUpsideDown = false;
+    float pSpeed = 1.0f;
 
-    // 2. Full hold
-    addBot({ { startTick, true, 1, false } });
+    if (!m_anchors.empty()) {
+        const auto& snap = m_anchors.back().p1Snapshot;
+        isDart = snap.isDart;
+        isShip = snap.isShip;
+        isBird = snap.isBird;
+        isBall = snap.isBall;
+        isRobot = snap.isRobot;
+        isSpider = snap.isSpider;
+        isSwing = snap.isSwing;
+        isUpsideDown = snap.isUpsideDown;
+        if (snap.playerSpeed > 0.1f) pSpeed = snap.playerSpeed;
+    } else if (m_headlessPlayLayer && m_headlessPlayLayer->m_player1) {
+        auto p = m_headlessPlayLayer->m_player1;
+        isDart = p->m_isDart;
+        isShip = p->m_isShip;
+        isBird = p->m_isBird;
+        isBall = p->m_isBall;
+        isRobot = p->m_isRobot;
+        isSpider = p->m_isSpider;
+        isSwing = p->m_isSwing;
+        isUpsideDown = p->m_isUpsideDown;
+        if (p->m_playerSpeed > 0.1f) pSpeed = p->m_playerSpeed;
+    }
 
-    // 3. Release sweeps if starts held
+    auto makeSingleTap = [startTick, horizon, startsHeld](uint32_t pressOffset, uint32_t dur) -> std::vector<Action> {
+        std::vector<Action> acts;
+        if (startsHeld && pressOffset > 0) {
+            acts.push_back({ startTick, false, 1, false });
+        }
+        uint32_t pTick = startTick + pressOffset;
+        acts.push_back({ pTick, true, 1, false });
+        if (pressOffset + dur < horizon) {
+            acts.push_back({ pTick + dur, false, 1, false });
+        }
+        return acts;
+    };
+
+    auto makeDoubleTap = [startTick, horizon, startsHeld](uint32_t off1, uint32_t dur1, uint32_t off2, uint32_t dur2) -> std::vector<Action> {
+        std::vector<Action> acts;
+        if (startsHeld && off1 > 0) {
+            acts.push_back({ startTick, false, 1, false });
+        }
+        uint32_t t1 = startTick + off1;
+        acts.push_back({ t1, true, 1, false });
+        if (off1 + dur1 < horizon) {
+            acts.push_back({ t1 + dur1, false, 1, false });
+        }
+        uint32_t t2 = startTick + off2;
+        if (off2 < horizon) {
+            acts.push_back({ t2, true, 1, false });
+            if (off2 + dur2 < horizon) {
+                acts.push_back({ t2 + dur2, false, 1, false });
+            }
+        }
+        return acts;
+    };
+
+    // 1. Baseline actions (~5%)
     if (startsHeld) {
-        for (uint32_t t = 1; t < horizon - 1; ++t) {
-            addBot({ { startTick + t, false, 1, false } });
+        // Continue holding
+        addBot({});
+        // Immediate release
+        addBot({ { startTick, false, 1, false } });
+        // Staggered releases
+        for (uint32_t r : { 2u, 4u, 6u, 8u, 12u, 16u, 22u, 30u, 40u, 50u }) {
+            if (r < horizon) {
+                addBot({ { startTick + r, false, 1, false } });
+            }
+        }
+    } else {
+        // Idle
+        addBot({});
+        // Full hold
+        addBot({ { startTick, true, 1, false } });
+        // Staggered releases after hold
+        for (uint32_t r : { 2u, 4u, 6u, 8u, 12u, 16u, 22u, 30u, 40u, 50u }) {
+            if (r < horizon) {
+                addBot({ { startTick, true, 1, false }, { startTick + r, false, 1, false } });
+            }
         }
     }
 
-    // 4. Single jumps at every 2 ticks with varied durations
+    // 2. Gamemode-specific flight & movement patterns (25-35%)
+    if (isDart) {
+        // Wave: symmetric zig-zag frequencies
+        for (uint32_t freq : { 2u, 3u, 4u, 5u, 6u, 8u, 10u, 12u, 16u }) {
+            for (uint32_t offset : { 0u, 1u, 2u }) {
+                std::vector<Action> waveActs1;
+                if (startsHeld) waveActs1.push_back({ startTick, false, 1, false });
+                bool state = false;
+                for (uint32_t t = offset; t < horizon; t += freq) {
+                    state = !state;
+                    waveActs1.push_back({ startTick + t, state, 1, false });
+                }
+                addBot(waveActs1);
+
+                std::vector<Action> waveActs2;
+                if (!startsHeld) waveActs2.push_back({ startTick, true, 1, false });
+                state = true;
+                for (uint32_t t = offset; t < horizon; t += freq) {
+                    state = !state;
+                    waveActs2.push_back({ startTick + t, state, 1, false });
+                }
+                addBot(waveActs2);
+            }
+        }
+
+        // Asymmetric climbing biases (hold > release)
+        for (auto [h, r] : std::vector<std::pair<uint32_t, uint32_t>>{
+            {4, 2}, {6, 3}, {8, 4}, {10, 4}, {12, 5}, {14, 6}, {18, 8}
+        }) {
+            std::vector<Action> climbActs;
+            if (startsHeld) climbActs.push_back({ startTick, false, 1, false });
+            uint32_t cur = 0;
+            while (cur < horizon) {
+                climbActs.push_back({ startTick + cur, true, 1, false });
+                cur += h;
+                if (cur < horizon) {
+                    climbActs.push_back({ startTick + cur, false, 1, false });
+                    cur += r;
+                }
+            }
+            addBot(climbActs);
+        }
+
+        // Asymmetric diving biases (hold < release)
+        for (auto [h, r] : std::vector<std::pair<uint32_t, uint32_t>>{
+            {2, 4}, {3, 6}, {4, 8}, {4, 10}, {5, 12}, {6, 14}, {8, 18}
+        }) {
+            std::vector<Action> diveActs;
+            if (startsHeld) diveActs.push_back({ startTick, false, 1, false });
+            uint32_t cur = 0;
+            while (cur < horizon) {
+                diveActs.push_back({ startTick + cur, true, 1, false });
+                cur += h;
+                if (cur < horizon) {
+                    diveActs.push_back({ startTick + cur, false, 1, false });
+                    cur += r;
+                }
+            }
+            addBot(diveActs);
+        }
+    } else if (isShip) {
+        // Ship: micro-flutter and pulse gliding
+        for (uint32_t pulse : { 1u, 2u, 3u, 4u, 6u, 8u, 12u, 16u }) {
+            for (uint32_t gap : { 1u, 2u, 3u, 4u, 6u, 8u, 12u }) {
+                for (uint32_t offset : { 0u, 1u, 2u, 4u }) {
+                    std::vector<Action> shipActs;
+                    if (startsHeld && offset > 0) shipActs.push_back({ startTick, false, 1, false });
+                    uint32_t cur = offset;
+                    while (cur < horizon) {
+                        shipActs.push_back({ startTick + cur, true, 1, false });
+                        cur += pulse;
+                        if (cur < horizon) {
+                            shipActs.push_back({ startTick + cur, false, 1, false });
+                            cur += gap;
+                        }
+                    }
+                    addBot(shipActs);
+                }
+            }
+        }
+    } else if (isBird) {
+        // UFO: periodic discrete impulse hops (duration 2 ticks)
+        for (uint32_t interval : { 6u, 8u, 10u, 12u, 14u, 16u, 18u, 22u, 26u, 30u }) {
+            for (uint32_t offset : { 0u, 2u, 4u, 6u }) {
+                std::vector<Action> ufoActs;
+                if (startsHeld && offset > 0) ufoActs.push_back({ startTick, false, 1, false });
+                uint32_t cur = offset;
+                while (cur < horizon) {
+                    ufoActs.push_back({ startTick + cur, true, 1, false });
+                    if (cur + 2 < horizon) {
+                        ufoActs.push_back({ startTick + cur + 2, false, 1, false });
+                    }
+                    cur += interval;
+                }
+                addBot(ufoActs);
+            }
+        }
+        for (uint32_t t1 = 0; t1 < horizon / 2; t1 += 6) {
+            addBot(makeDoubleTap(t1, 2, t1 + 6, 2));
+        }
+    } else if (isBall) {
+        // Ball: surface gravity flips
+        for (uint32_t t = 0; t < horizon; t += 2) {
+            addBot(makeSingleTap(t, 3));
+        }
+        for (uint32_t t1 = 0; t1 < horizon / 2; t1 += 4) {
+            for (uint32_t gap : { 6u, 10u, 14u, 20u }) {
+                if (t1 + gap < horizon) {
+                    addBot(makeDoubleTap(t1, 3, t1 + gap, 3));
+                }
+            }
+        }
+    } else if (isRobot) {
+        // Robot: variable hold jumps
+        for (uint32_t t = 0; t < horizon; t += 3) {
+            for (uint32_t dur : { 2u, 4u, 6u, 8u, 12u, 16u, 20u, 26u, 32u, 38u }) {
+                if (t + dur <= horizon + 10) {
+                    addBot(makeSingleTap(t, dur));
+                }
+            }
+        }
+    } else if (isSpider) {
+        // Spider: instant surface teleportation
+        for (uint32_t t = 0; t < horizon; t += 2) {
+            addBot(makeSingleTap(t, 2));
+        }
+        for (uint32_t t1 = 0; t1 < horizon / 2; t1 += 4) {
+            for (uint32_t gap : { 4u, 8u, 12u, 18u }) {
+                if (t1 + gap < horizon) {
+                    addBot(makeDoubleTap(t1, 2, t1 + gap, 2));
+                }
+            }
+        }
+    } else if (isSwing) {
+        // Swing: discrete gravity toggles
+        for (uint32_t interval : { 8u, 12u, 16u, 20u, 24u, 28u, 34u, 40u }) {
+            for (uint32_t offset : { 0u, 2u, 4u, 6u }) {
+                std::vector<Action> swingActs;
+                if (startsHeld && offset > 0) swingActs.push_back({ startTick, false, 1, false });
+                uint32_t cur = offset;
+                while (cur < horizon) {
+                    swingActs.push_back({ startTick + cur, true, 1, false });
+                    if (cur + 2 < horizon) {
+                        swingActs.push_back({ startTick + cur + 2, false, 1, false });
+                    }
+                    cur += interval;
+                }
+                addBot(swingActs);
+            }
+        }
+    }
+
+    // 3. Generic jumps & taps across horizon (Cube and universal coverage)
     for (uint32_t t = 0; t < horizon; t += 2) {
         for (uint32_t dur : { 2u, 4u, 8u, 14u, 24u, 36u }) {
-            std::vector<Action> acts;
-            acts.push_back({ startTick + t, true, 1, false });
-            if (t + dur < horizon) {
-                acts.push_back({ startTick + t + dur, false, 1, false });
-            }
-            addBot(acts);
+            addBot(makeSingleTap(t, dur));
         }
     }
 
-    // 5. Double taps
     for (uint32_t t1 = 0; t1 < horizon / 2; t1 += 4) {
         for (uint32_t gap : { 6u, 12u, 18u }) {
-            uint32_t t2 = t1 + gap;
-            if (t2 + 4 < horizon) {
-                std::vector<Action> acts;
-                acts.push_back({ startTick + t1, true, 1, false });
-                acts.push_back({ startTick + t1 + 3, false, 1, false });
-                acts.push_back({ startTick + t2, true, 1, false });
-                acts.push_back({ startTick + t2 + 3, false, 1, false });
-                addBot(acts);
+            if (t1 + gap < horizon) {
+                addBot(makeDoubleTap(t1, 3, t1 + gap, 3));
             }
         }
     }
 
-    // 6. Gamemode-specific flight waveforms (Wave / Ship / UFO / Swing)
-    if (m_headlessPlayLayer && m_headlessPlayLayer->m_player1) {
-        auto p = m_headlessPlayLayer->m_player1;
-        if (p->m_isDart) {
-            // Wave zigzag flight
-            for (uint32_t freq : { 2u, 3u, 4u, 6u, 8u, 12u, 16u }) {
-                std::vector<Action> waveActs;
-                bool state = false;
-                for (uint32_t t = 0; t < horizon; t += freq) {
-                    state = !state;
-                    waveActs.push_back({ startTick + t, state, 1, false });
-                }
-                addBot(waveActs);
-            }
-        } else if (p->m_isShip || p->m_isBird || p->m_isSwing) {
-            // Ship / UFO flutter pulses with fine-grained micro-clicks
-            for (uint32_t pulse : { 1u, 2u, 3u, 4u, 6u, 8u, 12u, 16u }) {
-                for (uint32_t gap : { 1u, 2u, 3u, 4u, 6u, 8u }) {
-                    for (uint32_t offset : { 0u, 2u, 4u }) {
-                        std::vector<Action> shipActs;
-                        uint32_t cur = offset;
-                        while (cur < horizon) {
-                            shipActs.push_back({ startTick + cur, true, 1, false });
-                            cur += pulse;
-                            if (cur < horizon) {
-                                shipActs.push_back({ startTick + cur, false, 1, false });
-                                cur += gap;
-                            }
-                        }
-                        addBot(shipActs);
+    // 4. Orbs (Jump rings) detection
+    float horizonDist = horizon * 1.5f * pSpeed;
+    auto orbs = solver::HazardDetector::getOrbsInWindow(
+        m_currentX - 10.0f, m_currentX + horizonDist,
+        m_headlessPlayLayer ? m_headlessPlayLayer->m_objects : nullptr
+    );
+    float speedRatio = 1.3f * pSpeed;
+    if (speedRatio < 0.2f) speedRatio = 1.3f;
+
+    for (auto obj : orbs) {
+        if (swarm.size() >= static_cast<size_t>(m_populationSize)) break;
+        float dist = obj->getPositionX() - m_currentX;
+        if (dist >= 0.0f) {
+            uint32_t approxTick = startTick + static_cast<uint32_t>(dist / speedRatio);
+            for (int delta : { -3, -2, -1, 0, 1, 2, 3 }) {
+                int target = static_cast<int>(approxTick) + delta;
+                if (target >= static_cast<int>(startTick) && static_cast<uint32_t>(target) < startTick + horizon) {
+                    uint32_t tapTick = static_cast<uint32_t>(target);
+                    uint32_t off = tapTick - startTick;
+                    addBot(makeSingleTap(off, 4));
+
+                    if (obj->m_objectType == GameObjectType::DashRing || obj->m_objectType == GameObjectType::GravityDashRing) {
+                        addBot(makeSingleTap(off, 24));
                     }
                 }
             }
         }
     }
 
-    // 7. Targeted mutations from previous wave attempts
-    if (m_waveAttempt > 0 && !m_currentWaveSurvivors.empty()) {
-        for (const auto& parent : m_currentWaveSurvivors) {
+    // 5. Targeted mutations from previous wave failures
+    if (m_waveAttempt > 0 && !m_currentWaveFailures.empty()) {
+        std::vector<BotCandidate> failures = m_currentWaveFailures;
+        std::sort(failures.begin(), failures.end(), [](const BotCandidate& a, const BotCandidate& b) {
+            return a.deathTick > b.deathTick;
+        });
+
+        size_t count = std::min(failures.size(), static_cast<size_t>(10));
+        for (size_t i = 0; i < count; ++i) {
             if (swarm.size() >= static_cast<size_t>(m_populationSize)) break;
+            const auto& parent = failures[i];
             if (parent.deathTick > startTick) {
                 uint32_t deathLocal = parent.deathTick - startTick;
                 for (uint32_t lead : { 1u, 2u, 4u, 7u, 12u, 18u, 25u }) {
                     if (deathLocal >= lead) {
                         uint32_t flipT = deathLocal - lead;
+                        int jitter = 0;
+                        if (m_temperature > 1.2f) {
+                            std::uniform_int_distribution<int> jitDist(-static_cast<int>(m_temperature), static_cast<int>(m_temperature));
+                            jitter = jitDist(m_rng);
+                        }
+                        int mutatedFlipT = std::clamp(static_cast<int>(flipT) + jitter, 0, static_cast<int>(horizon - 1));
+
                         std::vector<Action> flipped = parent.actions;
                         flipped.erase(std::remove_if(flipped.begin(), flipped.end(),
-                            [startTick, flipT](const Action& a) { return a.tick >= startTick + flipT; }), flipped.end());
-                        flipped.push_back({ startTick + flipT, true, 1, false });
-                        if (flipT + 8 < horizon) {
-                            flipped.push_back({ startTick + flipT + 8, false, 1, false });
+                            [startTick, mutatedFlipT](const Action& a) { return a.tick >= startTick + static_cast<uint32_t>(mutatedFlipT); }), flipped.end());
+
+                        flipped.push_back({ startTick + static_cast<uint32_t>(mutatedFlipT), true, 1, false });
+                        if (mutatedFlipT + 8 < static_cast<int>(horizon)) {
+                            flipped.push_back({ startTick + static_cast<uint32_t>(mutatedFlipT + 8), false, 1, false });
                         }
                         addBot(flipped);
                     }
@@ -329,34 +559,16 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
             }
         }
     }
-    // 8. Orb & Interactable jump rings / pads detection
-    float horizonDist = horizon * 1.5f;
-    auto interactables = solver::HazardDetector::getInteractablesInWindow(
-        m_currentX - 10.0f, m_currentX + horizonDist,
-        m_headlessPlayLayer ? m_headlessPlayLayer->m_objects : nullptr
-    );
-    for (auto obj : interactables) {
-        if (swarm.size() >= static_cast<size_t>(m_populationSize)) break;
-        float dist = obj->getPositionX() - m_currentX;
-        if (dist >= 0.0f) {
-            uint32_t approxTick = startTick + static_cast<uint32_t>(dist / 1.3f);
-            for (int delta : { -2, -1, 0, 1, 2 }) {
-                if (static_cast<int>(approxTick) + delta >= static_cast<int>(startTick) &&
-                    approxTick + delta < startTick + horizon) {
-                    uint32_t tapTick = approxTick + delta;
-                    addBot({ { tapTick, true, 1, false }, { std::min(startTick + horizon - 1, tapTick + 4), false, 1, false } });
-                }
-            }
-        }
-    }
 
-
-    // 7. Randomized fill to saturate population
+    // 6. Stochastic temperature-scaled fill
     std::uniform_int_distribution<uint32_t> tickDist(0, horizon - 1);
     std::uniform_int_distribution<int> boolDist(0, 1);
     while (swarm.size() < static_cast<size_t>(m_populationSize)) {
         std::vector<Action> rndActs;
-        uint32_t num = 1 + (m_rng() % 3);
+        if (startsHeld) {
+            rndActs.push_back({ startTick, false, 1, false });
+        }
+        uint32_t num = 1 + (m_rng() % 4);
         for (uint32_t i = 0; i < num; ++i) {
             rndActs.push_back({ startTick + tickDist(m_rng), boolDist(m_rng) == 1, 1, false });
         }
@@ -419,7 +631,8 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
         if (m_headlessPlayLayer->m_player1->m_isDead) {
             bot.died = true;
             bot.deathTick = step;
-            bot.finalX = m_headlessPlayLayer->m_player1->getPositionX();
+            bot.finalPos = m_headlessPlayLayer->m_player1->getPosition();
+            bot.finalX = bot.finalPos.x;
             bot.landedSafely = false;
             m_headlessSimulating = false;
             return;
@@ -430,26 +643,102 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
 
         if (m_headlessPlayLayer->m_hasCompletedLevel || m_headlessPlayLayer->m_player1->getPositionX() >= m_trueLevelLength || reachedEndPos) {
             bot.completed = true;
-            bot.finalX = m_headlessPlayLayer->m_player1->getPositionX();
+            bot.finalPos = m_headlessPlayLayer->m_player1->getPosition();
+            bot.finalX = bot.finalPos.x;
             bot.landedSafely = true;
+            bot.actualEndTick = step;
+            bot.p1Snapshot.capture(m_headlessPlayLayer->m_player1);
+            if (m_headlessPlayLayer->m_player2) {
+                bot.p2Snapshot.capture(m_headlessPlayLayer->m_player2);
+                bot.hasPlayer2 = true;
+            }
+            bot.clearance = solver::HazardDetector::MAX_CLEARANCE;
+            bot.fitnessScore = bot.finalX * 10.0f + bot.clearance + 100000.0f;
             m_headlessSimulating = false;
             return;
         }
     }
 
-    bot.finalX = m_headlessPlayLayer->m_player1->getPositionX();
-    bool reachedEndPosAfter = (m_headlessPlayLayer->getEndPosition().x > m_startX + 50.0f &&
+    auto p1 = m_headlessPlayLayer->m_player1;
+    bool isFlying = p1->m_isShip || p1->m_isBird || p1->m_isDart || p1->m_isSwing;
+    uint32_t actualEnd = totalSimulationTicks;
+
+    if (!isFlying && !p1->m_isOnGround) {
+        // Elastic landing extension: step up to 40 un-inputted ticks until landed or dead
+        const uint32_t maxExtension = 40;
+        for (uint32_t ext = 0; ext < maxExtension; ++ext) {
+            m_headlessPlayLayer->update(fixedDt);
+            actualEnd++;
+            m_ticksSampleCount++;
+
+            if (p1->m_isDead) {
+                bot.died = true;
+                bot.deathTick = actualEnd;
+                bot.finalPos = p1->getPosition();
+                bot.finalX = bot.finalPos.x;
+                bot.landedSafely = false;
+                m_headlessSimulating = false;
+                return;
+            }
+
+            bool reachedEndPosExt = (m_headlessPlayLayer->getEndPosition().x > m_startX + 50.0f &&
+                                     p1->getPositionX() >= m_headlessPlayLayer->getEndPosition().x - 10.0f);
+
+            if (m_headlessPlayLayer->m_hasCompletedLevel || p1->getPositionX() >= m_trueLevelLength || reachedEndPosExt) {
+                bot.completed = true;
+                bot.finalPos = p1->getPosition();
+                bot.finalX = bot.finalPos.x;
+                bot.landedSafely = true;
+                bot.actualEndTick = actualEnd;
+                bot.p1Snapshot.capture(p1);
+                if (m_headlessPlayLayer->m_player2) {
+                    bot.p2Snapshot.capture(m_headlessPlayLayer->m_player2);
+                    bot.hasPlayer2 = true;
+                }
+                bot.clearance = solver::HazardDetector::MAX_CLEARANCE;
+                bot.fitnessScore = bot.finalX * 10.0f + bot.clearance + 100000.0f;
+                m_headlessSimulating = false;
+                return;
+            }
+
+            if (p1->m_isOnGround) {
+                break;
+            }
+        }
+    }
+
+    bot.actualEndTick = actualEnd;
+    bot.finalPos = p1->getPosition();
+    bot.finalX = bot.finalPos.x;
+    bot.p1Snapshot.capture(p1);
+    if (m_headlessPlayLayer->m_player2) {
+        bot.p2Snapshot.capture(m_headlessPlayLayer->m_player2);
+        bot.hasPlayer2 = true;
+    }
+
+    size_t nearbyObstacles = 0;
+    bot.clearance = solver::HazardDetector::calculateClearance(
+        bot.finalPos,
+        m_headlessPlayLayer->m_objects,
+        nearbyObstacles
+    );
+
+    bool reachedEndPosFinal = (m_headlessPlayLayer->getEndPosition().x > m_startX + 50.0f &&
                                bot.finalX >= m_headlessPlayLayer->getEndPosition().x - 10.0f);
-    if (m_headlessPlayLayer->m_hasCompletedLevel || bot.finalX >= m_trueLevelLength || reachedEndPosAfter) {
+
+    if (m_headlessPlayLayer->m_hasCompletedLevel || bot.finalX >= m_trueLevelLength || reachedEndPosFinal) {
         bot.completed = true;
         bot.landedSafely = true;
+    } else if (isFlying) {
+        bot.landedSafely = (bot.clearance >= 5.0f);
     } else {
-        bool isFlying = m_headlessPlayLayer->m_player1->m_isShip ||
-                        m_headlessPlayLayer->m_player1->m_isBird ||
-                        m_headlessPlayLayer->m_player1->m_isDart ||
-                        m_headlessPlayLayer->m_player1->m_isSwing;
-        bot.landedSafely = isFlying || m_headlessPlayLayer->m_player1->m_isOnGround;
+        bot.landedSafely = p1->m_isOnGround;
     }
+
+    bot.fitnessScore = bot.finalX * 10.0f + bot.clearance;
+    if (bot.landedSafely) bot.fitnessScore += 500.0f;
+    if (bot.completed) bot.fitnessScore += 100000.0f;
+
     m_headlessSimulating = false;
 }
 
@@ -470,6 +759,7 @@ void SwarmSolver::stepSwarmBatch(uint32_t msBudget) {
         m_activeCandidates = generateSwarm(m_frontierTick, m_horizonTicks, startsHeld);
         m_currentCandidateIdx = 0;
         m_currentWaveSurvivors.clear();
+        m_currentWaveFailures.clear();
         m_telemetry.totalBots = m_populationSize;
         m_telemetry.aliveBots = m_populationSize;
     }
@@ -481,6 +771,7 @@ void SwarmSolver::stepSwarmBatch(uint32_t msBudget) {
 
         if (bot.died) {
             if (m_telemetry.aliveBots > 0) m_telemetry.aliveBots--;
+            m_currentWaveFailures.push_back(bot);
         } else {
             m_currentWaveSurvivors.push_back(bot);
         }
@@ -501,16 +792,8 @@ void SwarmSolver::stepSwarmBatch(uint32_t msBudget) {
         for (size_t i = 0; i < m_activeCandidates.size(); ++i) {
             const auto& bot = m_activeCandidates[i];
             if (!bot.died && (bot.landedSafely || bot.completed)) {
-                size_t nearbyObstacles = 0;
-                float clearance = solver::HazardDetector::calculateClearance(
-                    m_headlessPlayLayer && m_headlessPlayLayer->m_player1 ? m_headlessPlayLayer->m_player1->getPosition() : cocos2d::CCPoint{0, 0},
-                    m_headlessPlayLayer ? m_headlessPlayLayer->m_objects : nullptr,
-                    nearbyObstacles
-                );
-                float fitness = bot.finalX * 10.0f + clearance;
-                if (bot.completed) fitness += 100000.0f;
-                if (fitness > bestFitness) {
-                    bestFitness = fitness;
+                if (bot.fitnessScore > bestFitness) {
+                    bestFitness = bot.fitnessScore;
                     bestIdx = static_cast<int>(i);
                 }
             }
@@ -520,7 +803,7 @@ void SwarmSolver::stepSwarmBatch(uint32_t msBudget) {
             // Frontier Advancement
             const auto& winner = m_activeCandidates[bestIdx];
 
-            m_frontierTick += m_horizonTicks;
+            m_frontierTick = winner.actualEndTick > 0 ? winner.actualEndTick : (m_frontierTick + m_horizonTicks);
             m_currentX = winner.finalX;
 
             for (const auto& act : winner.actions) {
@@ -530,16 +813,15 @@ void SwarmSolver::stepSwarmBatch(uint32_t msBudget) {
             AnchorPoint newAnchor;
             newAnchor.tick = m_frontierTick;
             newAnchor.x = m_currentX;
-            newAnchor.p1Snapshot.capture(m_headlessPlayLayer->m_player1);
-            if (m_headlessPlayLayer->m_player2) {
-                newAnchor.p2Snapshot.capture(m_headlessPlayLayer->m_player2);
-                newAnchor.hasPlayer2 = true;
-            }
+            newAnchor.p1Snapshot = winner.p1Snapshot;
+            newAnchor.p2Snapshot = winner.p2Snapshot;
+            newAnchor.hasPlayer2 = winner.hasPlayer2;
             newAnchor.actionPrefixCount = m_verifiedPrefix.size();
             m_anchors.push_back(newAnchor);
 
             m_temperature = 1.0f;
             m_waveAttempt = 0;
+            m_currentWaveFailures.clear();
             m_activeCandidates.clear();
 
             bool isWinnerDone = winner.completed ||
@@ -600,18 +882,18 @@ void SwarmSolver::stepSwarmBatch(uint32_t msBudget) {
     m_telemetry.groundedAnchors = static_cast<uint32_t>(m_anchors.size());
     m_telemetry.rewindCount = m_rewindCount;
     m_telemetry.temperature = m_temperature;
-    if (m_headlessPlayLayer && m_headlessPlayLayer->m_player1) {
-        auto p = m_headlessPlayLayer->m_player1;
-        if (p->m_isDart) m_telemetry.activeMode = "Wave";
-        else if (p->m_isShip) m_telemetry.activeMode = "Ship";
-        else if (p->m_isBird) m_telemetry.activeMode = "UFO";
-        else if (p->m_isBall) m_telemetry.activeMode = "Ball";
-        else if (p->m_isRobot) m_telemetry.activeMode = "Robot";
-        else if (p->m_isSpider) m_telemetry.activeMode = "Spider";
-        else if (p->m_isSwing) m_telemetry.activeMode = "Swing";
+
+    if (!m_anchors.empty()) {
+        const auto& snap = m_anchors.back().p1Snapshot;
+        if (snap.isDart) m_telemetry.activeMode = "Wave";
+        else if (snap.isShip) m_telemetry.activeMode = "Ship";
+        else if (snap.isBird) m_telemetry.activeMode = "UFO";
+        else if (snap.isBall) m_telemetry.activeMode = "Ball";
+        else if (snap.isRobot) m_telemetry.activeMode = "Robot";
+        else if (snap.isSpider) m_telemetry.activeMode = "Spider";
+        else if (snap.isSwing) m_telemetry.activeMode = "Swing";
         else m_telemetry.activeMode = "Cube";
     }
-
 
     auto now = std::chrono::high_resolution_clock::now();
     auto durSec = std::chrono::duration<float>(now - m_speedTimer).count();
