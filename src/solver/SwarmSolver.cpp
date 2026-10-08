@@ -210,7 +210,7 @@ void SwarmSolver::captureInitialAnchor() {
     initial.tick = 0;
     initial.x = m_startX;
     initial.p1Snapshot.capture(m_headlessPlayLayer->m_player1);
-    if (m_headlessPlayLayer->m_isDualMode && m_headlessPlayLayer->m_player2) {
+    if (m_headlessPlayLayer->m_gameState.m_isDualMode && m_headlessPlayLayer->m_player2) {
         initial.p2Snapshot.capture(m_headlessPlayLayer->m_player2);
         initial.hasPlayer2 = true;
     } else {
@@ -879,7 +879,7 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
         m_headlessPlayLayer->update(fixedDt);
         m_ticksSampleCount++;
 
-        bool isDual = m_headlessPlayLayer->m_isDualMode;
+        bool isDual = m_headlessPlayLayer->m_gameState.m_isDualMode;
         bool candidateDied = m_headlessPlayLayer->m_playerDied ||
                              m_headlessPlayLayer->m_player1->m_isDead ||
                              (isDual && m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isDead);
@@ -928,7 +928,7 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
             actualEnd++;
             m_ticksSampleCount++;
 
-            bool isDualExt = m_headlessPlayLayer->m_isDualMode;
+            bool isDualExt = m_headlessPlayLayer->m_gameState.m_isDualMode;
             bool extDied = m_headlessPlayLayer->m_playerDied ||
                            p1->m_isDead ||
                            (isDualExt && m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isDead);
@@ -979,7 +979,7 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
     bot.finalPos = p1->getPosition();
     bot.finalX = bot.finalPos.x;
     bot.p1Snapshot.capture(p1);
-    bool isDualFinal = m_headlessPlayLayer->m_isDualMode;
+    bool isDualFinal = m_headlessPlayLayer->m_gameState.m_isDualMode;
     if (isDualFinal && m_headlessPlayLayer->m_player2) {
         bot.p2Snapshot.capture(m_headlessPlayLayer->m_player2);
         bot.hasPlayer2 = true;

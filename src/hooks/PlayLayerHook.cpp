@@ -15,7 +15,7 @@ class $modify(SolverPlayerObject, PlayerObject) {
     void playerDestroyed(bool noEffects) {
         if (SwarmSolver::get().isHeadlessSimulating()) {
             if (auto pl = SwarmSolver::get().getHeadlessPlayLayer()) {
-                if (this == pl->m_player2 && !pl->m_isDualMode) {
+                if ((this->m_isSecondPlayer || this == pl->m_player2) && !pl->m_gameState.m_isDualMode) {
                     return; // Ignore inactive player 2 destruction in single player mode
                 }
             }
@@ -101,7 +101,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         if (SwarmSolver::get().isHeadlessSimulating() || this == SwarmSolver::get().getHeadlessPlayLayer()) {
             // In single player mode, ignore any destruction of player 2
-            if (player && player == this->m_player2 && !this->m_isDualMode) {
+            if (player && (player->m_isSecondPlayer || player == this->m_player2) && !this->m_gameState.m_isDualMode) {
                 return;
             }
 
