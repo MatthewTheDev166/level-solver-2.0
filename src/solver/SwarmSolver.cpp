@@ -1,6 +1,7 @@
 #include "SwarmSolver.hpp"
 #include "../replay/MacroManager.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
+#include "../engine/HazardDetector.hpp"
 #include <Geode/binding/LocalLevelManager.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
 #include <algorithm>
@@ -13,6 +14,7 @@ SwarmSolver::~SwarmSolver() {
 
 void SwarmSolver::cleanupHeadless() {
     CheatAPIIntegrator::notifyCheatEnded();
+    solver::HazardDetector::clearIndex();
     m_isSolving = false;
     if (m_headlessPlayLayer) {
         m_headlessPlayLayer->removeFromParentAndCleanup(true);
@@ -29,6 +31,7 @@ void SwarmSolver::cleanupHeadless() {
 void SwarmSolver::reset() {
     cleanupHeadless();
     CheatAPIIntegrator::notifyCheatEnded();
+    solver::HazardDetector::clearIndex();
     m_isSolving = false;
     m_isCompleted = false;
     m_activeLevel = nullptr;
@@ -152,6 +155,8 @@ void SwarmSolver::start(GJGameLevel* level) {
     m_headlessPlayLayer->startGame();
     m_headlessPlayLayer->m_isPaused = false;
     m_headlessPlayLayer->m_hasCompletedLevel = false;
+    solver::HazardDetector::buildIndex(m_headlessPlayLayer->m_objects);
+
 
     calculateTrueLevelLength();
     captureInitialAnchor();
@@ -322,6 +327,27 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
             }
         }
     }
+    // 8. Orb & Interactable jump rings / pads detection
+    float horizonDist = horizon * 1.5f;
+    auto interactables = solver::HazardDetector::getInteractablesInWindow(
+        m_currentX - 10.0f, m_currentX + horizonDist,
+        m_headlessPlayLayer ? m_headlessPlayLayer->m_objects : nullptr
+    );
+    for (auto obj : interactables) {
+        if (swarm.size() >= static_cast<size_t>(m_populationSize)) break;
+        float dist = obj->getPositionX() - m_currentX;
+        if (dist >= 0.0f) {
+            uint32_t approxTick = startTick + static_cast<uint32_t>(dist / 1.3f);
+            for (int delta : { -2, -1, 0, 1, 2 }) {
+                if (static_cast<int>(approxTick) + delta >= static_cast<int>(startTick) &&
+                    approxTick + delta < startTick + horizon) {
+                    uint32_t tapTick = approxTick + delta;
+                    addBot({ { tapTick, true, 1, false }, { std::min(startTick + horizon - 1, tapTick + 4), false, 1, false } });
+                }
+            }
+        }
+    }
+
 
     // 7. Randomized fill to saturate population
     std::uniform_int_distribution<uint32_t> tickDist(0, horizon - 1);
@@ -473,8 +499,16 @@ void SwarmSolver::stepSwarmBatch(uint32_t msBudget) {
         for (size_t i = 0; i < m_activeCandidates.size(); ++i) {
             const auto& bot = m_activeCandidates[i];
             if (!bot.died && (bot.landedSafely || bot.completed)) {
-                if (bot.finalX > bestFitness) {
-                    bestFitness = bot.finalX;
+                size_t nearbyObstacles = 0;
+                float clearance = solver::HazardDetector::calculateClearance(
+                    m_headlessPlayLayer && m_headlessPlayLayer->m_player1 ? m_headlessPlayLayer->m_player1->getPosition() : cocos2d::CCPoint{0, 0},
+                    m_headlessPlayLayer ? m_headlessPlayLayer->m_objects : nullptr,
+                    nearbyObstacles
+                );
+                float fitness = bot.finalX * 10.0f + clearance;
+                if (bot.completed) fitness += 100000.0f;
+                if (fitness > bestFitness) {
+                    bestFitness = fitness;
                     bestIdx = static_cast<int>(i);
                 }
             }
@@ -518,6 +552,9 @@ void SwarmSolver::stepSwarmBatch(uint32_t msBudget) {
                 m_telemetry.status = SolverStatus::Solved;
                 m_telemetry.isVerified = true;
                 m_telemetry.detailMessage = "Level Solved (100% Verified)!";
+                int lvlID = m_activeLevel ? m_activeLevel->m_levelID.value() : 0;
+                std::string lvlName = m_activeLevel ? m_activeLevel->m_levelName : "";
+                MacroManager::get().saveMacroForLevel(lvlID, lvlName, m_verifiedPrefix);
                 MacroManager::get().setMacro(m_verifiedPrefix);
                 geode::Notification::create("Level Solved! 100% Verified!", geode::NotificationIcon::Success)->show();
             }

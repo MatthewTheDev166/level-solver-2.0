@@ -3,6 +3,7 @@
 #include "../core/Types.hpp"
 #include <vector>
 #include <string>
+#include <unordered_map>
 
 class MacroManager {
 public:
@@ -18,9 +19,14 @@ public:
     const std::vector<Action>& getMacro() const { return m_actions; }
     bool hasMacro() const { return !m_actions.empty(); }
 
+    bool hasMacroForLevel(int levelID, const std::string& levelName) const;
+    bool loadMacroForLevel(int levelID, const std::string& levelName);
+    void saveMacroForLevel(int levelID, const std::string& levelName, const std::vector<Action>& actions);
+
     void startReplay(GJGameLevel* level = nullptr);
     void stopReplay();
     bool isReplayActive() const { return m_replayActive; }
+    bool isInjectingInput() const { return m_isInjectingInput; }
     void stepReplay(PlayLayer* playLayer);
 
     void resetPlayback() {
@@ -38,4 +44,9 @@ private:
     size_t m_currentActionIndex = 0;
     uint32_t m_replayTick = 0;
     bool m_replayActive = false;
+    bool m_isInjectingInput = false;
+
+    std::unordered_map<int, std::vector<Action>> m_levelMacros;
+    std::unordered_map<std::string, std::vector<Action>> m_nameMacros;
 };
+

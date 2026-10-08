@@ -1,9 +1,22 @@
 #include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/GJBaseGameLayer.hpp>
 #include "../solver/SwarmSolver.hpp"
 #include "../replay/MacroManager.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
 
 using namespace geode::prelude;
+
+class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
+    void handleButton(bool down, int button, bool isPlayer1) {
+        if (MacroManager::get().isReplayActive()) {
+            if (!MacroManager::get().isInjectingInput()) {
+                // Block all human user clicks / keystrokes during bot replay!
+                return;
+            }
+        }
+        GJBaseGameLayer::handleButton(down, button, isPlayer1);
+    }
+};
 
 class $modify(SolverPlayLayer, PlayLayer) {
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
@@ -20,10 +33,10 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void update(float dt) {
-        PlayLayer::update(dt);
         if (MacroManager::get().isReplayActive()) {
             MacroManager::get().stepReplay(this);
         }
+        PlayLayer::update(dt);
     }
 
     void resetLevel() {

@@ -150,45 +150,49 @@ void SolverOverlay::render() {
 
         // 5. Action Control Bar (Big prominent buttons)
         ImGui::Spacing();
-        if (tel.status == SolverStatus::Searching) {
-            if (ImGui::Button("Pause Solver", ImVec2(140, 36))) {
-                SwarmSolver::get().pause();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Stop & Reset", ImVec2(140, 36))) {
-                SwarmSolver::get().reset();
-            }
-        } else if (tel.status == SolverStatus::Paused) {
-            if (ImGui::Button("Resume Solver", ImVec2(140, 36))) {
-                SwarmSolver::get().resume();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Reset Solver", ImVec2(140, 36))) {
-                SwarmSolver::get().reset();
-            }
-        } else {
-            if (ImGui::Button("Start Solver", ImVec2(160, 36))) {
-                SwarmSolver::get().start(levelInfo.level);
-            }
+
+        bool isSolving = SwarmSolver::get().isSolving();
+        bool hasMacroForLevel = MacroManager::get().hasMacroForLevel(levelInfo.levelID, levelInfo.levelName) || (tel.status == SolverStatus::Solved);
+
+        // 1. [Start Solver]
+        if (isSolving) ImGui::BeginDisabled();
+        if (ImGui::Button("Start Solver", ImVec2(140, 36))) {
+            SwarmSolver::get().start(levelInfo.level);
         }
+        if (isSolving) ImGui::EndDisabled();
 
         ImGui::SameLine();
 
-        bool hasMacro = MacroManager::get().hasMacro() || (tel.status == SolverStatus::Solved);
-        if (!hasMacro) ImGui::BeginDisabled();
+        // 2. [Stop Solver]
+        if (!isSolving) ImGui::BeginDisabled();
+        if (ImGui::Button("Stop Solver", ImVec2(140, 36))) {
+            SwarmSolver::get().stop();
+        }
+        if (!isSolving) ImGui::EndDisabled();
+
+        ImGui::SameLine();
+
+        // 3. [Replay in GD]
+        bool canReplay = !isSolving && hasMacroForLevel;
+        if (!canReplay) ImGui::BeginDisabled();
         if (ImGui::Button("Replay in GD", ImVec2(130, 36))) {
             s_showOverlay = false;
             ImGuiCocos::get().setVisible(false);
+            MacroManager::get().loadMacroForLevel(levelInfo.levelID, levelInfo.levelName);
             MacroManager::get().startReplay(levelInfo.level);
         }
-        if (!hasMacro) ImGui::EndDisabled();
+        if (!canReplay) ImGui::EndDisabled();
 
         ImGui::SameLine();
-        if (!hasMacro) ImGui::BeginDisabled();
+
+        // 4. [Export to Mega Hack]
+        bool canExport = !isSolving && hasMacroForLevel;
+        if (!canExport) ImGui::BeginDisabled();
         if (ImGui::Button("Export to Mega Hack", ImVec2(150, 36))) {
+            MacroManager::get().loadMacroForLevel(levelInfo.levelID, levelInfo.levelName);
             MacroManager::get().exportActiveMacro(levelInfo.level);
         }
-        if (!hasMacro) ImGui::EndDisabled();
+        if (!canExport) ImGui::EndDisabled();
 
         ImGui::Spacing();
         ImGui::Separator();
