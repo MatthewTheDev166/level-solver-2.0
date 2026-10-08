@@ -5,16 +5,12 @@
 using namespace geode::prelude;
 
 bool MenuManager::isInAllowedMenu() const {
-    if (m_editLevelLayer || m_levelInfoLayer || m_levelSelectLayer) {
-        return true;
-    }
-
     auto scene = CCDirector::sharedDirector()->getRunningScene();
     if (!scene) return false;
 
-    if (scene->getChildByType<EditLevelLayer>(0)) return true;
-    if (scene->getChildByType<LevelInfoLayer>(0)) return true;
-    if (scene->getChildByType<LevelSelectLayer>(0)) return true;
+    if (scene->getChildByType<EditLevelLayer>(0) != nullptr) return true;
+    if (scene->getChildByType<LevelInfoLayer>(0) != nullptr) return true;
+    if (scene->getChildByType<LevelSelectLayer>(0) != nullptr) return true;
 
     return false;
 }
@@ -22,36 +18,38 @@ bool MenuManager::isInAllowedMenu() const {
 MenuLevelInfo MenuManager::getActiveLevelInfo() const {
     MenuLevelInfo info;
     auto scene = CCDirector::sharedDirector()->getRunningScene();
+    if (!scene) return info;
 
     // 1. EditLevelLayer
-    auto edit = m_editLevelLayer ? m_editLevelLayer : (scene ? scene->getChildByType<EditLevelLayer>(0) : nullptr);
-    if (edit && edit->m_level) {
-        info.level = edit->m_level;
-        info.levelName = edit->m_level->m_levelName;
-        info.creatorName = edit->m_level->m_creatorName.empty() ? "You" : edit->m_level->m_creatorName;
-        info.levelID = edit->m_level->m_levelID.value();
-        info.stars = edit->m_level->m_stars.value();
-        info.isCustom = true;
-        info.context = MenuContext::EditLevel;
-        return info;
+    if (auto edit = scene->getChildByType<EditLevelLayer>(0)) {
+        if (edit->m_level) {
+            info.level = edit->m_level;
+            info.levelName = edit->m_level->m_levelName;
+            info.creatorName = edit->m_level->m_creatorName.empty() ? "You" : edit->m_level->m_creatorName;
+            info.levelID = edit->m_level->m_levelID.value();
+            info.stars = edit->m_level->m_stars.value();
+            info.isCustom = true;
+            info.context = MenuContext::EditLevel;
+            return info;
+        }
     }
 
     // 2. LevelInfoLayer
-    auto lvlInfo = m_levelInfoLayer ? m_levelInfoLayer : (scene ? scene->getChildByType<LevelInfoLayer>(0) : nullptr);
-    if (lvlInfo && lvlInfo->m_level) {
-        info.level = lvlInfo->m_level;
-        info.levelName = lvlInfo->m_level->m_levelName;
-        info.creatorName = lvlInfo->m_level->m_creatorName.empty() ? "-" : lvlInfo->m_level->m_creatorName;
-        info.levelID = lvlInfo->m_level->m_levelID.value();
-        info.stars = lvlInfo->m_level->m_stars.value();
-        info.isCustom = false;
-        info.context = MenuContext::LevelInfo;
-        return info;
+    if (auto lvlInfo = scene->getChildByType<LevelInfoLayer>(0)) {
+        if (lvlInfo->m_level) {
+            info.level = lvlInfo->m_level;
+            info.levelName = lvlInfo->m_level->m_levelName;
+            info.creatorName = lvlInfo->m_level->m_creatorName.empty() ? "-" : lvlInfo->m_level->m_creatorName;
+            info.levelID = lvlInfo->m_level->m_levelID.value();
+            info.stars = lvlInfo->m_level->m_stars.value();
+            info.isCustom = false;
+            info.context = MenuContext::LevelInfo;
+            return info;
+        }
     }
 
     // 3. LevelSelectLayer
-    auto select = m_levelSelectLayer ? m_levelSelectLayer : (scene ? scene->getChildByType<LevelSelectLayer>(0) : nullptr);
-    if (select) {
+    if (auto select = scene->getChildByType<LevelSelectLayer>(0)) {
         int page = 0;
         if (select->m_scrollLayer) {
             page = select->m_scrollLayer->m_page;

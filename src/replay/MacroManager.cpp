@@ -1,4 +1,6 @@
 #include "MacroManager.hpp"
+#include "../core/CheatAPIIntegrator.hpp"
+
 #include <fstream>
 #include <filesystem>
 #include <sstream>
@@ -33,6 +35,8 @@ void MacroManager::startReplay(GJGameLevel* level) {
     m_currentActionIndex = 0;
     m_replayTick = 0;
 
+    CheatAPIIntegrator::notifyCheatStarted();
+
     if (m_playLayer) {
         m_playLayer->resetLevel();
         geode::Notification::create("Replaying solution in GD...", geode::NotificationIcon::Info)->show();
@@ -44,6 +48,7 @@ void MacroManager::startReplay(GJGameLevel* level) {
 }
 
 void MacroManager::stopReplay() {
+    CheatAPIIntegrator::notifyCheatEnded();
     m_replayActive = false;
     m_currentActionIndex = 0;
     m_replayTick = 0;

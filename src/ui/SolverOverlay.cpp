@@ -135,11 +135,13 @@ void SolverOverlay::render() {
             ImGui::Text("Frontier Tick: %u (%.2fs)", tel.frontierTick, tel.frontierTick / 240.0f);
             ImGui::Text("Wave: #%u (Attempt: %u)", tel.activeWave, tel.waveAttempt);
             ImGui::Text("Simulation Speed: %.0f ticks/sec", tel.ticksPerSecond);
+            ImGui::Text("Active Gamemode: %s", tel.activeMode.c_str());
 
             ImGui::TableNextColumn();
             ImGui::Text("Grounded Anchors: %u checkpoints", tel.groundedAnchors);
             ImGui::Text("Timeline Rewinds: %u times", tel.rewindCount);
             ImGui::Text("Mutation Temperature: %.2fx", tel.temperature);
+            ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "CheatAPI: Active (0 Attempts Racked)");
 
             ImGui::EndTable();
         }
@@ -221,6 +223,8 @@ void SolverOverlay::render() {
                 ImGui::BulletText("Engine: Grounded Time-Rollback Swarm at 240 TPS");
                 ImGui::BulletText("Toggle Hotkey: Right Shift (or F8)");
                 ImGui::BulletText("Permitted Menus: EditLevelLayer, LevelInfoLayer, LevelSelectLayer");
+                ImGui::BulletText("Cheat Protection: legowiifun.cheat_api integrated");
+                ImGui::BulletText("Zero Attempt Inflation: PlayLayer::resetLevel attempt counts frozen");
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();

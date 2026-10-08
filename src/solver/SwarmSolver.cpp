@@ -1,5 +1,8 @@
 #include "SwarmSolver.hpp"
 #include "../replay/MacroManager.hpp"
+#include "../core/CheatAPIIntegrator.hpp"
+#include <Geode/binding/LocalLevelManager.hpp>
+#include <Geode/binding/GameLevelManager.hpp>
 #include <algorithm>
 
 using namespace geode::prelude;
@@ -9,6 +12,7 @@ SwarmSolver::~SwarmSolver() {
 }
 
 void SwarmSolver::cleanupHeadless() {
+    CheatAPIIntegrator::notifyCheatEnded();
     m_isSolving = false;
     if (m_headlessPlayLayer) {
         m_headlessPlayLayer->removeFromParentAndCleanup(true);
@@ -24,6 +28,7 @@ void SwarmSolver::cleanupHeadless() {
 
 void SwarmSolver::reset() {
     cleanupHeadless();
+    CheatAPIIntegrator::notifyCheatEnded();
     m_isSolving = false;
     m_isCompleted = false;
     m_activeLevel = nullptr;
@@ -45,18 +50,21 @@ void SwarmSolver::reset() {
 
 void SwarmSolver::stop() {
     m_isSolving = false;
+    CheatAPIIntegrator::notifyCheatEnded();
     m_telemetry.status = SolverStatus::Paused;
     m_telemetry.detailMessage = "Solving stopped";
 }
 
 void SwarmSolver::pause() {
     m_isSolving = false;
+    CheatAPIIntegrator::notifyCheatEnded();
     m_telemetry.status = SolverStatus::Paused;
     m_telemetry.detailMessage = "Solving paused";
 }
 
 void SwarmSolver::resume() {
     if (m_headlessPlayLayer && !m_isCompleted) {
+        CheatAPIIntegrator::notifyCheatStarted();
         m_isSolving = true;
         m_telemetry.status = SolverStatus::Searching;
         m_telemetry.detailMessage = "Solving resumed...";
@@ -76,7 +84,33 @@ void SwarmSolver::start(GJGameLevel* level) {
         return;
     }
 
+    // Ensure level string is loaded before PlayLayer::create to prevent ZipUtils crash in other mods
+    if (level->m_levelString.empty()) {
+        if (auto llm = LocalLevelManager::sharedState()) {
+            auto str = llm->getMainLevelString(level->m_levelID.value());
+            if (!str.empty()) {
+                level->m_levelString = str;
+            }
+        }
+    }
+    if (level->m_levelString.empty()) {
+        if (auto glm = GameLevelManager::sharedState()) {
+            auto str = glm->getMainLevelString(level->m_levelID.value());
+            if (!str.empty()) {
+                level->m_levelString = str;
+            }
+        }
+    }
+
+    if (level->m_levelString.empty()) {
+        m_telemetry.status = SolverStatus::Failed;
+        m_telemetry.detailMessage = "Level data empty! Open/play level once first.";
+        geode::Notification::create("Please open or play this level once to load its data before solving!", geode::NotificationIcon::Warning)->show();
+        return;
+    }
+
     reset();
+    CheatAPIIntegrator::notifyCheatStarted();
     m_activeLevel = level;
 
     // Create off-screen headless simulation environment
@@ -275,6 +309,9 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
     if (m_headlessPlayLayer->m_player2) m_headlessPlayLayer->m_player2->m_isDead = false;
     m_headlessPlayLayer->m_isPaused = false;
     m_headlessPlayLayer->m_hasCompletedLevel = false;
+    m_headlessPlayLayer->m_resumeTimer = 0;
+    m_headlessPlayLayer->m_queuedButtons.clear();
+    m_headlessPlayLayer->moveCameraToPos(m_headlessPlayLayer->m_player1->getPosition());
 
     size_t prefixIdx = 0;
     size_t candIdx = 0;
@@ -316,7 +353,11 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
     }
 
     bot.finalX = m_headlessPlayLayer->m_player1->getPositionX();
-    bot.landedSafely = m_headlessPlayLayer->m_player1->m_isOnGround;
+    bool isFlying = m_headlessPlayLayer->m_player1->m_isShip ||
+                    m_headlessPlayLayer->m_player1->m_isBird ||
+                    m_headlessPlayLayer->m_player1->m_isDart ||
+                    m_headlessPlayLayer->m_player1->m_isSwing;
+    bot.landedSafely = isFlying || m_headlessPlayLayer->m_player1->m_isOnGround;
     m_headlessSimulating = false;
 }
 
@@ -450,6 +491,18 @@ void SwarmSolver::stepSwarmBatch(uint32_t msBudget) {
     m_telemetry.groundedAnchors = static_cast<uint32_t>(m_anchors.size());
     m_telemetry.rewindCount = m_rewindCount;
     m_telemetry.temperature = m_temperature;
+    if (m_headlessPlayLayer && m_headlessPlayLayer->m_player1) {
+        auto p = m_headlessPlayLayer->m_player1;
+        if (p->m_isDart) m_telemetry.activeMode = "Wave";
+        else if (p->m_isShip) m_telemetry.activeMode = "Ship";
+        else if (p->m_isBird) m_telemetry.activeMode = "UFO";
+        else if (p->m_isBall) m_telemetry.activeMode = "Ball";
+        else if (p->m_isRobot) m_telemetry.activeMode = "Robot";
+        else if (p->m_isSpider) m_telemetry.activeMode = "Spider";
+        else if (p->m_isSwing) m_telemetry.activeMode = "Swing";
+        else m_telemetry.activeMode = "Cube";
+    }
+
 
     auto now = std::chrono::high_resolution_clock::now();
     auto durSec = std::chrono::duration<float>(now - m_speedTimer).count();

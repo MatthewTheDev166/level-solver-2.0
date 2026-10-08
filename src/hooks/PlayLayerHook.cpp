@@ -1,6 +1,7 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include "../solver/SwarmSolver.hpp"
 #include "../replay/MacroManager.hpp"
+#include "../core/CheatAPIIntegrator.hpp"
 
 using namespace geode::prelude;
 
@@ -13,6 +14,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void onQuit() {
+        CheatAPIIntegrator::notifyCheatEnded();
         MacroManager::get().onLevelExited();
         PlayLayer::onQuit();
     }
@@ -24,14 +26,75 @@ class $modify(SolverPlayLayer, PlayLayer) {
         }
     }
 
-    void destroyPlayer(PlayerObject* player, GameObject* object) {
-        if (SwarmSolver::get().isHeadlessSimulating()) {
-            if (player) {
-                player->m_isDead = true;
+    void resetLevel() {
+        bool isHeadless = SwarmSolver::get().isHeadlessSimulating();
+        bool isReplaying = MacroManager::get().isReplayActive();
+
+        if (isHeadless || isReplaying) {
+            int prevAttempts = this->m_attempts;
+            int prevLvlAttempts = this->m_level ? this->m_level->m_attempts.value() : 0;
+
+            PlayLayer::resetLevel();
+
+            // Freeze attempts so bots / headless waves never inflate attempt stats
+            this->m_attempts = prevAttempts;
+            if (this->m_level) {
+                this->m_level->m_attempts = prevLvlAttempts;
             }
             return;
         }
+
+        PlayLayer::resetLevel();
+    }
+
+    void destroyPlayer(PlayerObject* player, GameObject* object) {
+        if (SwarmSolver::get().isHeadlessSimulating()) {
+            // 1. Ignore spawn anti-cheat spike
+            if (object && (object == this->m_anticheatSpike || (object->m_objectID == 8 && object->getPositionX() <= 30.0f))) {
+                return;
+            }
+
+            // 2. Ignore camera culling / off-screen boundary deaths (object == nullptr) unless fallen into void
+            if (!object) {
+                if (player && player->getPositionY() < -50.0f) {
+                    player->m_isDead = true;
+                    this->m_playerDied = true;
+                }
+                return;
+            }
+
+            // 3. Real hazard collision death
+            if (player) {
+                player->m_isDead = true;
+            }
+            this->m_playerDied = true;
+            return;
+        }
+
         PlayLayer::destroyPlayer(player, object);
     }
+
+    void levelComplete() {
+        if (SwarmSolver::get().isHeadlessSimulating()) {
+            this->m_hasCompletedLevel = true;
+            return;
+        }
+        if (MacroManager::get().isReplayActive()) {
+            CheatAPIIntegrator::notifyCheatStarted();
+        }
+        PlayLayer::levelComplete();
+    }
+
+    void showEndLayer() {
+        if (SwarmSolver::get().isHeadlessSimulating()) {
+            this->m_hasCompletedLevel = true;
+            return;
+        }
+        if (MacroManager::get().isReplayActive()) {
+            CheatAPIIntegrator::notifyCheatStarted();
+        }
+        PlayLayer::showEndLayer();
+    }
 };
+
 
