@@ -286,20 +286,22 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
                 addBot(waveActs);
             }
         } else if (p->m_isShip || p->m_isBird || p->m_isSwing) {
-            // Ship / UFO flutter pulses
-            for (uint32_t pulse : { 4u, 8u, 12u, 16u, 20u }) {
-                for (uint32_t gap : { 4u, 8u, 12u }) {
-                    std::vector<Action> shipActs;
-                    uint32_t cur = 0;
-                    while (cur < horizon) {
-                        shipActs.push_back({ startTick + cur, true, 1, false });
-                        cur += pulse;
-                        if (cur < horizon) {
-                            shipActs.push_back({ startTick + cur, false, 1, false });
-                            cur += gap;
+            // Ship / UFO flutter pulses with fine-grained micro-clicks
+            for (uint32_t pulse : { 1u, 2u, 3u, 4u, 6u, 8u, 12u, 16u }) {
+                for (uint32_t gap : { 1u, 2u, 3u, 4u, 6u, 8u }) {
+                    for (uint32_t offset : { 0u, 2u, 4u }) {
+                        std::vector<Action> shipActs;
+                        uint32_t cur = offset;
+                        while (cur < horizon) {
+                            shipActs.push_back({ startTick + cur, true, 1, false });
+                            cur += pulse;
+                            if (cur < horizon) {
+                                shipActs.push_back({ startTick + cur, false, 1, false });
+                                cur += gap;
+                            }
                         }
+                        addBot(shipActs);
                     }
-                    addBot(shipActs);
                 }
             }
         }
