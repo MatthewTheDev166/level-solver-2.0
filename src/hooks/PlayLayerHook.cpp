@@ -41,6 +41,10 @@ class $modify(SolverPlayLayer, PlayLayer) {
             if (this->m_level) {
                 this->m_level->m_attempts = prevLvlAttempts;
             }
+
+            if (isReplaying) {
+                MacroManager::get().resetPlayback();
+            }
             return;
         }
 
@@ -95,6 +99,41 @@ class $modify(SolverPlayLayer, PlayLayer) {
         }
         PlayLayer::showEndLayer();
     }
+
+    void playEndAnimationToPos(cocos2d::CCPoint position) {
+        if (SwarmSolver::get().isHeadlessSimulating()) {
+            this->m_hasCompletedLevel = true;
+            return;
+        }
+        PlayLayer::playEndAnimationToPos(position);
+    }
+
+    void playPlatformerEndAnimationToPos(cocos2d::CCPoint position, bool instant) {
+        if (SwarmSolver::get().isHeadlessSimulating()) {
+            this->m_hasCompletedLevel = true;
+            return;
+        }
+        PlayLayer::playPlatformerEndAnimationToPos(position, instant);
+    }
+
+    void activateEndTrigger(int targetID, bool reverse, bool lockPlayerY) {
+        if (SwarmSolver::get().isHeadlessSimulating()) {
+            this->m_hasCompletedLevel = true;
+            return;
+        }
+        PlayLayer::activateEndTrigger(targetID, reverse, lockPlayerY);
+    }
+
+    void checkForEnd() {
+        if (SwarmSolver::get().isHeadlessSimulating()) {
+            if (this->m_player1 && this->m_player1->getPositionX() >= this->getEndPosition().x - 10.0f) {
+                this->m_hasCompletedLevel = true;
+                return;
+            }
+        }
+        PlayLayer::checkForEnd();
+    }
+
 };
 
 

@@ -23,6 +23,11 @@ public:
     bool isReplayActive() const { return m_replayActive; }
     void stepReplay(PlayLayer* playLayer);
 
+    void resetPlayback() {
+        m_currentActionIndex = 0;
+        m_replayTick = 0;
+    }
+
     std::string exportActiveMacro(GJGameLevel* level = nullptr);
 
 private:

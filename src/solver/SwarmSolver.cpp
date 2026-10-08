@@ -81,6 +81,14 @@ void SwarmSolver::start(GJGameLevel* level) {
     if (level->isPlatformer()) {
         m_telemetry.status = SolverStatus::Failed;
         m_telemetry.detailMessage = "Platformer levels unsupported";
+        geode::Notification::create("Platformer levels are not supported by Level Solver.", geode::NotificationIcon::Warning)->show();
+        return;
+    }
+
+    if (level->m_twoPlayerMode) {
+        m_telemetry.status = SolverStatus::Failed;
+        m_telemetry.detailMessage = "2-Player levels unsupported";
+        geode::Notification::create("2-Player levels are not supported by Level Solver.", geode::NotificationIcon::Warning)->show();
         return;
     }
 
@@ -159,7 +167,7 @@ void SwarmSolver::start(GJGameLevel* level) {
 }
 
 void SwarmSolver::calculateTrueLevelLength() {
-    float maxObjX = 0.0f;
+    float maxObjX = m_startX;
     if (m_headlessPlayLayer && m_headlessPlayLayer->m_objects) {
         for (unsigned int i = 0; i < m_headlessPlayLayer->m_objects->count(); ++i) {
             if (auto obj = geode::cast::typeinfo_cast<GameObject*>(m_headlessPlayLayer->m_objects->objectAtIndex(i))) {
@@ -171,8 +179,19 @@ void SwarmSolver::calculateTrueLevelLength() {
         }
     }
 
-    float robtopEnd = m_headlessPlayLayer ? m_headlessPlayLayer->getEndPosition().x : 1065.0f;
-    m_trueLevelLength = std::max({maxObjX, robtopEnd, 1065.0f});
+    float robtopEnd = m_headlessPlayLayer ? m_headlessPlayLayer->getEndPosition().x : 0.0f;
+    float trueLength = m_startX + 300.0f;
+    if (maxObjX > m_startX + 50.0f) {
+        trueLength = std::max(trueLength, maxObjX);
+    }
+    if (robtopEnd > m_startX + 50.0f) {
+        if (maxObjX > m_startX + 50.0f) {
+            trueLength = std::max(trueLength, robtopEnd);
+        } else {
+            trueLength = robtopEnd;
+        }
+    }
+    m_trueLevelLength = trueLength;
 }
 
 void SwarmSolver::captureInitialAnchor() {
@@ -247,7 +266,41 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
         }
     }
 
-    // 6. Targeted mutations from previous wave attempts
+    // 6. Gamemode-specific flight waveforms (Wave / Ship / UFO / Swing)
+    if (m_headlessPlayLayer && m_headlessPlayLayer->m_player1) {
+        auto p = m_headlessPlayLayer->m_player1;
+        if (p->m_isDart) {
+            // Wave zigzag flight
+            for (uint32_t freq : { 2u, 3u, 4u, 6u, 8u, 12u, 16u }) {
+                std::vector<Action> waveActs;
+                bool state = false;
+                for (uint32_t t = 0; t < horizon; t += freq) {
+                    state = !state;
+                    waveActs.push_back({ startTick + t, state, 1, false });
+                }
+                addBot(waveActs);
+            }
+        } else if (p->m_isShip || p->m_isBird || p->m_isSwing) {
+            // Ship / UFO flutter pulses
+            for (uint32_t pulse : { 4u, 8u, 12u, 16u, 20u }) {
+                for (uint32_t gap : { 4u, 8u, 12u }) {
+                    std::vector<Action> shipActs;
+                    uint32_t cur = 0;
+                    while (cur < horizon) {
+                        shipActs.push_back({ startTick + cur, true, 1, false });
+                        cur += pulse;
+                        if (cur < horizon) {
+                            shipActs.push_back({ startTick + cur, false, 1, false });
+                            cur += gap;
+                        }
+                    }
+                    addBot(shipActs);
+                }
+            }
+        }
+    }
+
+    // 7. Targeted mutations from previous wave attempts
     if (m_waveAttempt > 0 && !m_currentWaveSurvivors.empty()) {
         for (const auto& parent : m_currentWaveSurvivors) {
             if (swarm.size() >= static_cast<size_t>(m_populationSize)) break;
@@ -344,7 +397,10 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
             return;
         }
 
-        if (m_headlessPlayLayer->m_hasCompletedLevel || m_headlessPlayLayer->m_player1->getPositionX() >= m_trueLevelLength) {
+        bool reachedEndPos = (m_headlessPlayLayer->getEndPosition().x > m_startX + 50.0f &&
+                              m_headlessPlayLayer->m_player1->getPositionX() >= m_headlessPlayLayer->getEndPosition().x - 10.0f);
+
+        if (m_headlessPlayLayer->m_hasCompletedLevel || m_headlessPlayLayer->m_player1->getPositionX() >= m_trueLevelLength || reachedEndPos) {
             bot.completed = true;
             bot.finalX = m_headlessPlayLayer->m_player1->getPositionX();
             bot.landedSafely = true;
@@ -354,11 +410,18 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
     }
 
     bot.finalX = m_headlessPlayLayer->m_player1->getPositionX();
-    bool isFlying = m_headlessPlayLayer->m_player1->m_isShip ||
-                    m_headlessPlayLayer->m_player1->m_isBird ||
-                    m_headlessPlayLayer->m_player1->m_isDart ||
-                    m_headlessPlayLayer->m_player1->m_isSwing;
-    bot.landedSafely = isFlying || m_headlessPlayLayer->m_player1->m_isOnGround;
+    bool reachedEndPosAfter = (m_headlessPlayLayer->getEndPosition().x > m_startX + 50.0f &&
+                               bot.finalX >= m_headlessPlayLayer->getEndPosition().x - 10.0f);
+    if (m_headlessPlayLayer->m_hasCompletedLevel || bot.finalX >= m_trueLevelLength || reachedEndPosAfter) {
+        bot.completed = true;
+        bot.landedSafely = true;
+    } else {
+        bool isFlying = m_headlessPlayLayer->m_player1->m_isShip ||
+                        m_headlessPlayLayer->m_player1->m_isBird ||
+                        m_headlessPlayLayer->m_player1->m_isDart ||
+                        m_headlessPlayLayer->m_player1->m_isSwing;
+        bot.landedSafely = isFlying || m_headlessPlayLayer->m_player1->m_isOnGround;
+    }
     m_headlessSimulating = false;
 }
 
@@ -443,7 +506,13 @@ void SwarmSolver::stepSwarmBatch(uint32_t msBudget) {
             m_waveAttempt = 0;
             m_activeCandidates.clear();
 
-            if (winner.completed || m_currentX >= m_trueLevelLength || m_headlessPlayLayer->m_hasCompletedLevel) {
+            bool isWinnerDone = winner.completed ||
+                                m_currentX >= m_trueLevelLength ||
+                                m_headlessPlayLayer->m_hasCompletedLevel ||
+                                (m_headlessPlayLayer->getEndPosition().x > m_startX + 50.0f &&
+                                 m_currentX >= m_headlessPlayLayer->getEndPosition().x - 10.0f);
+
+            if (isWinnerDone) {
                 m_isCompleted = true;
                 m_isSolving = false;
                 m_telemetry.status = SolverStatus::Solved;

@@ -7,20 +7,20 @@
 
 void MacroManager::onLevelEntered(PlayLayer* playLayer) {
     m_playLayer = playLayer;
-    m_replayActive = false;
     m_currentActionIndex = 0;
     m_replayTick = 0;
 }
 
 void MacroManager::onLevelExited() {
+    stopReplay();
     m_playLayer = nullptr;
-    m_replayActive = false;
-    m_currentActionIndex = 0;
-    m_replayTick = 0;
 }
 
 void MacroManager::setMacro(const std::vector<Action>& actions) {
     m_actions = actions;
+    std::sort(m_actions.begin(), m_actions.end(), [](const Action& a, const Action& b) {
+        return a.tick < b.tick;
+    });
     m_currentActionIndex = 0;
     m_replayTick = 0;
 }
