@@ -2,6 +2,52 @@
 #include <Geode/Geode.hpp>
 #include <vector>
 #include <cstdint>
+#include <string>
+
+enum class SolverStatus : uint8_t {
+    Idle = 0,
+    Searching = 1,
+    Paused = 2,
+    Solved = 3,
+    Failed = 4
+};
+
+enum class MenuContext : uint8_t {
+    None = 0,
+    EditLevel = 1,
+    LevelInfo = 2,
+    LevelSelect = 3
+};
+
+struct MenuLevelInfo {
+    GJGameLevel* level = nullptr;
+    std::string levelName = "No Level Selected";
+    std::string creatorName = "-";
+    int levelID = 0;
+    int stars = 0;
+    bool isCustom = false;
+    MenuContext context = MenuContext::None;
+};
+
+struct SwarmTelemetry {
+    SolverStatus status = SolverStatus::Idle;
+    std::string detailMessage = "Ready to solve";
+    int aliveBots = 160;
+    int totalBots = 160;
+    float currentX = 0.0f;
+    float targetEndX = 1000.0f;
+    float progressPercent = 0.0f;
+    uint32_t activeWave = 0;
+    uint32_t waveAttempt = 0;
+    uint32_t frontierTick = 0;
+    uint32_t groundedAnchors = 0;
+    uint32_t rewindCount = 0;
+    float ticksPerSecond = 0.0f;
+    float temperature = 1.0f;
+    bool isVerified = false;
+    std::string activeMode = "Cube";
+};
+
 
 struct Action {
     uint32_t tick = 0;

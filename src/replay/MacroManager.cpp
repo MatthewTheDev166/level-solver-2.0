@@ -23,8 +23,8 @@ void MacroManager::setMacro(const std::vector<Action>& actions) {
     m_replayTick = 0;
 }
 
-void MacroManager::startReplay() {
-    if (m_actions.empty() || !m_playLayer) {
+void MacroManager::startReplay(GJGameLevel* level) {
+    if (m_actions.empty()) {
         geode::Notification::create("No macro recorded yet!", geode::NotificationIcon::Warning)->show();
         return;
     }
@@ -32,8 +32,15 @@ void MacroManager::startReplay() {
     m_replayActive = true;
     m_currentActionIndex = 0;
     m_replayTick = 0;
-    m_playLayer->resetLevel();
-    geode::Notification::create("Replaying solution in GD...", geode::NotificationIcon::Info)->show();
+
+    if (m_playLayer) {
+        m_playLayer->resetLevel();
+        geode::Notification::create("Replaying solution in GD...", geode::NotificationIcon::Info)->show();
+    } else if (level) {
+        geode::Notification::create("Launching replay...", geode::NotificationIcon::Info)->show();
+        auto scene = PlayLayer::scene(level, false, false);
+        cocos2d::CCDirector::sharedDirector()->replaceScene(scene);
+    }
 }
 
 void MacroManager::stopReplay() {
@@ -63,7 +70,7 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
     }
 }
 
-std::string MacroManager::exportActiveMacro() {
+std::string MacroManager::exportActiveMacro(GJGameLevel* level) {
     if (m_actions.empty()) {
         geode::Notification::create("No macro available to export!", geode::NotificationIcon::Warning)->show();
         return "";
@@ -72,6 +79,8 @@ std::string MacroManager::exportActiveMacro() {
     std::string levelID = "custom";
     if (m_playLayer && m_playLayer->m_level) {
         levelID = std::to_string(m_playLayer->m_level->m_levelID.value());
+    } else if (level) {
+        levelID = std::to_string(level->m_levelID.value());
     }
 
     // Build Mega Hack compatible JSON

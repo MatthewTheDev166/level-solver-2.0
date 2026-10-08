@@ -18,12 +18,12 @@ public:
     const std::vector<Action>& getMacro() const { return m_actions; }
     bool hasMacro() const { return !m_actions.empty(); }
 
-    void startReplay();
+    void startReplay(GJGameLevel* level = nullptr);
     void stopReplay();
     bool isReplayActive() const { return m_replayActive; }
     void stepReplay(PlayLayer* playLayer);
 
-    std::string exportActiveMacro();
+    std::string exportActiveMacro(GJGameLevel* level = nullptr);
 
 private:
     MacroManager() = default;
