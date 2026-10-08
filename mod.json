@@ -8,11 +8,12 @@
 	"version": "v2.0.0",
 	"developer": "Matthew",
 	"description": "Autonomous Level Solver with Dear ImGui overlay and Grounded Swarm Engine.",
-	"dependencies": {
-		"legowiifun.cheat_api": {
+	"dependencies": [
+		{
+			"id": "legowiifun.cheat_api",
 			"version": ">=1.2.3",
-			"required": false
+			"importance": "suggested"
 		}
-	}
+	]
 }
 

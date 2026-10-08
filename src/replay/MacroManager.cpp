@@ -26,6 +26,7 @@ void MacroManager::onLevelEntered(PlayLayer* playLayer) {
 
 void MacroManager::onLevelExited() {
     stopReplay();
+    CheatAPIIntegrator::notifyCheatEnded();
     m_playLayer = nullptr;
 }
 
@@ -165,10 +166,12 @@ void MacroManager::startReplay(GJGameLevel* level) {
 }
 
 void MacroManager::stopReplay() {
-    CheatAPIIntegrator::notifyCheatEnded();
     m_replayActive = false;
     m_currentActionIndex = 0;
     m_replayTick = 0;
+    if (!m_playLayer) {
+        CheatAPIIntegrator::notifyCheatEnded();
+    }
 }
 
 void MacroManager::stepReplay(PlayLayer* playLayer) {
@@ -191,6 +194,7 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
         geode::Notification::create("Replay Complete!", geode::NotificationIcon::Success)->show();
     } else if (playLayer->m_player1 && playLayer->m_player1->m_isDead) {
         stopReplay();
+        geode::Notification::create("Replay stopped: player died.", geode::NotificationIcon::Warning)->show();
     }
 }
 

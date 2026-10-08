@@ -25,9 +25,13 @@ class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
         if (!isHalfTick && MacroManager::get().isReplayActive()) {
             if (auto pl = typeinfo_cast<PlayLayer*>(this)) {
-                if (pl != SwarmSolver::get().getHeadlessPlayLayer() &&
-                    !pl->m_inResetDelay && pl->m_started && !pl->m_playerDied && pl->m_player1 && !pl->m_player1->m_isDead) {
-                    MacroManager::get().stepReplay(pl);
+                if (pl != SwarmSolver::get().getHeadlessPlayLayer()) {
+                    if (pl->m_playerDied || (pl->m_player1 && pl->m_player1->m_isDead)) {
+                        MacroManager::get().stopReplay();
+                        geode::Notification::create("Replay stopped: player died.", geode::NotificationIcon::Warning)->show();
+                    } else if (!pl->m_inResetDelay && pl->m_started) {
+                        MacroManager::get().stepReplay(pl);
+                    }
                 }
             }
         }
@@ -102,6 +106,11 @@ class $modify(SolverPlayLayer, PlayLayer) {
             }
             this->m_playerDied = true;
             return;
+        }
+
+        if (MacroManager::get().isReplayActive()) {
+            MacroManager::get().stopReplay();
+            geode::Notification::create("Replay stopped: player died.", geode::NotificationIcon::Warning)->show();
         }
 
         PlayLayer::destroyPlayer(player, object);

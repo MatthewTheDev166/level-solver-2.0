@@ -18,11 +18,11 @@ void SolverOverlay::setup() {
     }).draw([] {
         SolverOverlay::render();
     });
+    ImGuiCocos::get().setVisible(true);
 }
 
 void SolverOverlay::toggleVisibility() {
     s_showOverlay = !s_showOverlay;
-    ImGuiCocos::get().setVisible(s_showOverlay);
     if (s_showOverlay) {
         PlatformToolbox::showCursor();
         if (auto view = cocos2d::CCEGLView::sharedOpenGLView()) {
@@ -37,7 +37,6 @@ bool SolverOverlay::isVisible() {
 
 void SolverOverlay::setVisible(bool visible) {
     s_showOverlay = visible;
-    ImGuiCocos::get().setVisible(visible);
     if (visible) {
         PlatformToolbox::showCursor();
         if (auto view = cocos2d::CCEGLView::sharedOpenGLView()) {
@@ -61,7 +60,6 @@ void SolverOverlay::render() {
     // Guard: Only render when inside one of the 3 allowed menus
     if (!MenuManager::get().isInAllowedMenu()) {
         s_showOverlay = false;
-        ImGuiCocos::get().setVisible(false);
         return;
     }
 
