@@ -234,6 +234,7 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
     std::vector<std::vector<Action>> mutationList;
 
     // Mode and speed detection from latest verified anchor
+    // Mode, speed, and size detection from latest verified anchor
     bool isDart = false;
     bool isShip = false;
     bool isBird = false;
@@ -242,6 +243,7 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
     bool isSpider = false;
     bool isSwing = false;
     bool isUpsideDown = false;
+    bool isMini = false;
     float pSpeed = 1.0f;
 
     if (!m_anchors.empty()) {
@@ -254,6 +256,7 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
         isSpider = snap.isSpider;
         isSwing = snap.isSwing;
         isUpsideDown = snap.isUpsideDown;
+        isMini = snap.isMini;
         if (snap.playerSpeed > 0.1f) pSpeed = snap.playerSpeed;
     } else if (m_headlessPlayLayer && m_headlessPlayLayer->m_player1) {
         auto p = m_headlessPlayLayer->m_player1;
@@ -265,6 +268,7 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
         isSpider = p->m_isSpider;
         isSwing = p->m_isSwing;
         isUpsideDown = p->m_isUpsideDown;
+        isMini = p->m_isMini;
         if (p->m_playerSpeed > 0.1f) pSpeed = p->m_playerSpeed;
     }
 
@@ -290,12 +294,8 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
         std::vector<Action> acts;
         if (startsHeld) {
             acts.push_back({ startTick, false, 1, false });
-            if (off1 == 0) {
-                off1 = 1;
-            }
-            if (off2 <= off1) {
-                off2 = off1 + dur1 + 1;
-            }
+            if (off1 == 0) off1 = 1;
+            if (off2 <= off1) off2 = off1 + dur1 + 1;
         }
         uint32_t t1 = startTick + off1;
         if (off1 < horizon) {
@@ -316,11 +316,25 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
 
     // 1. Baseline actions (~5%)
     if (startsHeld) {
-        baselineList.push_back({}); // Continue holding
+        baselineList.push_back({}); // Continue holding full horizon
         baselineList.push_back({ { startTick, false, 1, false } }); // Immediate release
         for (uint32_t r : { 2u, 4u, 6u, 8u, 12u, 16u, 22u, 30u, 40u, 50u }) {
             if (r < horizon) {
                 baselineList.push_back({ { startTick + r, false, 1, false } });
+            }
+        }
+        // Continuing hold then tapping
+        for (uint32_t rel : { 6u, 12u, 20u, 32u, 45u }) {
+            for (uint32_t tapGap : { 4u, 8u, 14u }) {
+                if (rel + tapGap < horizon) {
+                    std::vector<Action> acts;
+                    acts.push_back({ startTick + rel, false, 1, false });
+                    acts.push_back({ startTick + rel + tapGap, true, 1, false });
+                    if (rel + tapGap + 4 < horizon) {
+                        acts.push_back({ startTick + rel + tapGap + 4, false, 1, false });
+                    }
+                    baselineList.push_back(acts);
+                }
             }
         }
     } else {
@@ -333,11 +347,104 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
         }
     }
 
-    // 2. Gamemode-specific flight & movement patterns (20-25%)
+    // 2. Portal detection & proactive mode transition injection
+    float horizonDist = horizon * 1.5f * pSpeed;
+    float speedRatio = 1.3f * pSpeed;
+    if (speedRatio < 0.2f) speedRatio = 1.3f;
+
+    auto portals = solver::HazardDetector::getPortalsInWindow(
+        m_currentX - 5.0f, m_currentX + horizonDist,
+        m_headlessPlayLayer ? m_headlessPlayLayer->m_objects : nullptr
+    );
+
+    GameObject* nearestPortal = nullptr;
+    float minPortalDist = 999999.0f;
+    for (auto portal : portals) {
+        float pdist = portal->getPositionX() - m_currentX;
+        if (pdist >= -15.0f && pdist < minPortalDist) {
+            minPortalDist = pdist;
+            nearestPortal = portal;
+        }
+    }
+
+    if (nearestPortal && minPortalDist <= horizonDist) {
+        uint32_t portalOffset = minPortalDist <= 0.0f ? 0 : static_cast<uint32_t>(minPortalDist / speedRatio);
+        auto pType = nearestPortal->m_objectType;
+
+        if (pType == GameObjectType::WavePortal) {
+            // Approaching Wave: inject zig-zags starting from portal
+            for (uint32_t freq : { 1u, 2u, 3u, 4u, 6u, 8u }) {
+                std::vector<Action> acts;
+                if (startsHeld && portalOffset > 0) acts.push_back({ startTick, false, 1, false });
+                bool st = false;
+                for (uint32_t t = portalOffset; t < horizon; t += freq) {
+                    st = !st;
+                    acts.push_back({ startTick + t, st, 1, false });
+                }
+                modeSpecificList.push_back(acts);
+            }
+        } else if (pType == GameObjectType::ShipPortal) {
+            // Approaching Ship: inject micro-flutters starting from portal
+            for (uint32_t pulse : { 2u, 4u, 6u }) {
+                for (uint32_t gap : { 2u, 4u, 6u }) {
+                    std::vector<Action> acts;
+                    if (startsHeld && portalOffset > 0) acts.push_back({ startTick, false, 1, false });
+                    uint32_t cur = portalOffset;
+                    while (cur < horizon) {
+                        acts.push_back({ startTick + cur, true, 1, false });
+                        cur += pulse;
+                        if (cur < horizon) {
+                            acts.push_back({ startTick + cur, false, 1, false });
+                            cur += gap;
+                        }
+                    }
+                    modeSpecificList.push_back(acts);
+                }
+            }
+        } else if (pType == GameObjectType::UfoPortal) {
+            // Approaching UFO: discrete hops starting from portal
+            for (uint32_t off = portalOffset; off < horizon; off += 4) {
+                modeSpecificList.push_back(makeSingleTap(off, 2));
+            }
+        } else if (pType == GameObjectType::BallPortal) {
+            // Approaching Ball: surface flips starting from portal
+            for (uint32_t off = portalOffset; off < horizon; off += 4) {
+                modeSpecificList.push_back(makeSingleTap(off, 3));
+            }
+        } else if (pType == GameObjectType::RobotPortal) {
+            // Approaching Robot: variable holds starting from portal
+            for (uint32_t dur : { 4u, 8u, 16u, 28u, 45u, 65u }) {
+                if (portalOffset + dur < horizon) {
+                    modeSpecificList.push_back(makeSingleTap(portalOffset, dur));
+                }
+            }
+        } else if (pType == GameObjectType::SpiderPortal) {
+            // Approaching Spider: teleports starting from portal
+            for (uint32_t off = portalOffset; off < horizon; off += 3) {
+                modeSpecificList.push_back(makeSingleTap(off, 2));
+            }
+        } else if (pType == GameObjectType::SwingPortal) {
+            // Approaching Swing: discrete flips starting from portal
+            for (uint32_t off = portalOffset; off < horizon; off += 4) {
+                modeSpecificList.push_back(makeSingleTap(off, 2));
+            }
+        } else if (pType == GameObjectType::CubePortal) {
+            // Approaching Cube: jumps starting from portal
+            for (uint32_t off = portalOffset; off < horizon; off += 4) {
+                modeSpecificList.push_back(makeSingleTap(off, 8));
+            }
+        }
+    }
+
+    // 3. Gamemode-specific flight & movement patterns (35%)
     if (isDart) {
-        // Wave: symmetric zig-zag frequencies
-        for (uint32_t freq : { 2u, 3u, 4u, 5u, 6u, 8u, 10u, 12u, 16u }) {
-            for (uint32_t offset : { 0u, 1u, 2u }) {
+        // Wave: symmetric zig-zag frequencies (including 1-tick micro-clicks and mini frequencies)
+        std::vector<uint32_t> waveFreqs = isMini ?
+            std::vector<uint32_t>{ 1u, 2u, 3u, 4u, 5u, 6u, 8u } :
+            std::vector<uint32_t>{ 1u, 2u, 3u, 4u, 5u, 6u, 8u, 10u, 12u, 16u };
+
+        for (uint32_t freq : waveFreqs) {
+            for (uint32_t offset : { 0u, 1u, 2u, 3u }) {
                 std::vector<Action> waveActs1;
                 if (startsHeld) waveActs1.push_back({ startTick, false, 1, false });
                 bool state = false;
@@ -358,10 +465,27 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
             }
         }
 
-        // Asymmetric climbing biases (hold > release)
-        for (auto [h, r] : std::vector<std::pair<uint32_t, uint32_t>>{
-            {4, 2}, {6, 3}, {8, 4}, {10, 4}, {12, 5}, {14, 6}, {18, 8}
-        }) {
+        // Micro-pulse adjustments (1-2 ticks) across the horizon
+        for (uint32_t t = 0; t < horizon; t += 2) {
+            modeSpecificList.push_back(makeSingleTap(t, 1));
+            modeSpecificList.push_back(makeSingleTap(t, 2));
+            modeSpecificList.push_back(makeSingleTap(t, 3));
+        }
+
+        // Asymmetric biases (hold vs release)
+        // Note: when upside down, holding pushes down and releasing pushes up!
+        std::vector<std::pair<uint32_t, uint32_t>> climbPairs = {
+            {3, 2}, {4, 2}, {6, 3}, {8, 4}, {10, 4}, {12, 5}, {14, 6}, {18, 8}
+        };
+        std::vector<std::pair<uint32_t, uint32_t>> divePairs = {
+            {2, 3}, {2, 4}, {3, 6}, {4, 8}, {4, 10}, {5, 12}, {6, 14}, {8, 18}
+        };
+
+        if (isUpsideDown) {
+            std::swap(climbPairs, divePairs);
+        }
+
+        for (auto [h, r] : climbPairs) {
             std::vector<Action> climbActs;
             if (startsHeld) climbActs.push_back({ startTick, false, 1, false });
             uint32_t cur = 0;
@@ -376,10 +500,7 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
             modeSpecificList.push_back(climbActs);
         }
 
-        // Asymmetric diving biases (hold < release)
-        for (auto [h, r] : std::vector<std::pair<uint32_t, uint32_t>>{
-            {2, 4}, {3, 6}, {4, 8}, {4, 10}, {5, 12}, {6, 14}, {8, 18}
-        }) {
+        for (auto [h, r] : divePairs) {
             std::vector<Action> diveActs;
             if (startsHeld) diveActs.push_back({ startTick, false, 1, false });
             uint32_t cur = 0;
@@ -394,9 +515,14 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
             modeSpecificList.push_back(diveActs);
         }
     } else if (isShip) {
-        // Ship: micro-flutter and pulse gliding
-        for (uint32_t pulse : { 1u, 2u, 3u, 4u, 6u, 8u, 12u, 16u }) {
-            for (uint32_t gap : { 1u, 2u, 3u, 4u, 6u, 8u, 12u }) {
+        // Ship: micro-flutter, straight-fly pulses, ascents, descents
+        std::vector<uint32_t> pulses = isMini ?
+            std::vector<uint32_t>{ 1u, 2u, 3u, 4u, 6u, 8u } :
+            std::vector<uint32_t>{ 1u, 2u, 3u, 4u, 6u, 8u, 12u, 16u };
+        std::vector<uint32_t> gaps = { 1u, 2u, 3u, 4u, 6u, 8u, 12u };
+
+        for (uint32_t pulse : pulses) {
+            for (uint32_t gap : gaps) {
                 for (uint32_t offset : { 0u, 1u, 2u, 4u }) {
                     std::vector<Action> shipActs;
                     if (startsHeld && offset > 0) shipActs.push_back({ startTick, false, 1, false });
@@ -413,10 +539,31 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
                 }
             }
         }
+
+        // Single pulses for fine height tuning
+        for (uint32_t t = 0; t < horizon; t += 3) {
+            for (uint32_t dur : { 1u, 2u, 4u, 6u }) {
+                modeSpecificList.push_back(makeSingleTap(t, dur));
+            }
+        }
     } else if (isBird) {
-        // UFO: periodic discrete impulse hops (duration 2 ticks)
-        for (uint32_t interval : { 6u, 8u, 10u, 12u, 14u, 16u, 18u, 22u, 26u, 30u }) {
-            for (uint32_t offset : { 0u, 2u, 4u, 6u }) {
+        // UFO: discrete impulse hops across ENTIRE horizon
+        for (uint32_t t = 0; t < horizon; t += 2) {
+            modeSpecificList.push_back(makeSingleTap(t, 2));
+        }
+
+        // Double hops across entire horizon with varied gaps
+        for (uint32_t t1 = 0; t1 < horizon; t1 += 3) {
+            for (uint32_t gap : { 4u, 6u, 8u, 10u, 14u, 18u, 24u }) {
+                if (t1 + gap < horizon) {
+                    modeSpecificList.push_back(makeDoubleTap(t1, 2, t1 + gap, 2));
+                }
+            }
+        }
+
+        // Periodic flap rhythms
+        for (uint32_t interval : { 6u, 8u, 10u, 12u, 14u, 16u, 20u, 24u, 28u }) {
+            for (uint32_t offset : { 0u, 2u, 4u }) {
                 std::vector<Action> ufoActs;
                 if (startsHeld && offset > 0) ufoActs.push_back({ startTick, false, 1, false });
                 uint32_t cur = offset;
@@ -430,46 +577,83 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
                 modeSpecificList.push_back(ufoActs);
             }
         }
-        for (uint32_t t1 = 0; t1 < horizon / 2; t1 += 6) {
-            modeSpecificList.push_back(makeDoubleTap(t1, 2, t1 + 6, 2));
-        }
     } else if (isBall) {
-        // Ball: surface gravity flips
+        // Ball: surface gravity flips across ENTIRE horizon
         for (uint32_t t = 0; t < horizon; t += 2) {
             modeSpecificList.push_back(makeSingleTap(t, 3));
         }
-        for (uint32_t t1 = 0; t1 < horizon / 2; t1 += 4) {
-            for (uint32_t gap : { 6u, 10u, 14u, 20u }) {
+
+        // Buffer flips: holds that buffer gravity change upon landing
+        for (uint32_t t = 0; t < horizon; t += 4) {
+            for (uint32_t dur : { 6u, 12u, 20u, 32u }) {
+                modeSpecificList.push_back(makeSingleTap(t, dur));
+            }
+        }
+
+        // Double flips across entire horizon
+        for (uint32_t t1 = 0; t1 < horizon; t1 += 3) {
+            for (uint32_t gap : { 6u, 10u, 14u, 20u, 28u }) {
                 if (t1 + gap < horizon) {
                     modeSpecificList.push_back(makeDoubleTap(t1, 3, t1 + gap, 3));
                 }
             }
         }
     } else if (isRobot) {
-        // Robot: variable hold jumps
+        // Robot: variable hold jumps spanning the FULL range from micro-hops to full maximum height
         for (uint32_t t = 0; t < horizon; t += 3) {
-            for (uint32_t dur : { 2u, 4u, 6u, 8u, 12u, 16u, 20u, 26u, 32u, 38u }) {
-                if (t + dur <= horizon + 10) {
-                    modeSpecificList.push_back(makeSingleTap(t, dur));
+            for (uint32_t dur : { 2u, 4u, 6u, 8u, 12u, 16u, 22u, 30u, 40u, 52u, 65u, 80u }) {
+                modeSpecificList.push_back(makeSingleTap(t, dur));
+            }
+        }
+
+        // Double jumps (e.g. micro-hop then full jump, or vice versa)
+        for (uint32_t t1 = 0; t1 < horizon; t1 += 4) {
+            for (uint32_t gap : { 10u, 18u, 28u }) {
+                if (t1 + gap < horizon) {
+                    modeSpecificList.push_back(makeDoubleTap(t1, 4, t1 + gap, 24));
+                    modeSpecificList.push_back(makeDoubleTap(t1, 24, t1 + gap, 4));
                 }
             }
         }
     } else if (isSpider) {
-        // Spider: instant surface teleportation
+        // Spider: instant surface teleportation across ENTIRE horizon
         for (uint32_t t = 0; t < horizon; t += 2) {
             modeSpecificList.push_back(makeSingleTap(t, 2));
         }
-        for (uint32_t t1 = 0; t1 < horizon / 2; t1 += 4) {
-            for (uint32_t gap : { 4u, 8u, 12u, 18u }) {
+
+        // Buffer teleports: holds that teleport as soon as touching surface
+        for (uint32_t t = 0; t < horizon; t += 4) {
+            for (uint32_t dur : { 6u, 12u, 20u }) {
+                modeSpecificList.push_back(makeSingleTap(t, dur));
+            }
+        }
+
+        // Double teleports across entire horizon
+        for (uint32_t t1 = 0; t1 < horizon; t1 += 3) {
+            for (uint32_t gap : { 4u, 8u, 12u, 18u, 26u }) {
                 if (t1 + gap < horizon) {
                     modeSpecificList.push_back(makeDoubleTap(t1, 2, t1 + gap, 2));
                 }
             }
         }
     } else if (isSwing) {
-        // Swing: discrete gravity toggles
-        for (uint32_t interval : { 8u, 12u, 16u, 20u, 24u, 28u, 34u, 40u }) {
-            for (uint32_t offset : { 0u, 2u, 4u, 6u }) {
+        // Swing: discrete gravity toggle taps (every click flips gravity)
+        for (uint32_t t = 0; t < horizon; t += 2) {
+            modeSpecificList.push_back(makeSingleTap(t, 2));
+        }
+
+        // Double flips (flip and flip back) across entire horizon
+        for (uint32_t t1 = 0; t1 < horizon; t1 += 3) {
+            for (uint32_t gap : { 6u, 10u, 14u, 18u, 24u, 32u }) {
+                if (t1 + gap < horizon) {
+                    modeSpecificList.push_back(makeDoubleTap(t1, 2, t1 + gap, 2));
+                }
+            }
+        }
+
+        // Periodic sinusoidal glides
+        for (uint32_t interval : { 8u, 12u, 16u, 20u, 26u, 34u, 42u }) {
+            for (uint32_t offset : { 0u, 2u, 4u }) {
                 std::vector<Action> swingActs;
                 if (startsHeld && offset > 0) swingActs.push_back({ startTick, false, 1, false });
                 uint32_t cur = offset;
@@ -484,37 +668,49 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
             }
         }
     } else {
-        // Cube: varied duration jump sweeps
-        for (uint32_t t = 0; t < horizon; t += 3) {
+        // Cube: varied duration jump sweeps & buffer holds
+        for (uint32_t t = 0; t < horizon; t += 2) {
             for (uint32_t dur : { 2u, 4u, 8u, 14u, 24u, 36u }) {
                 modeSpecificList.push_back(makeSingleTap(t, dur));
             }
         }
     }
 
-    // 3. Generic jumps & taps across horizon
+    // 4. Generic jumps & taps tailored to current physics
+    std::vector<uint32_t> genericDurs;
+    if (isDart) {
+        genericDurs = { 1u, 2u, 3u, 4u, 6u, 8u };
+    } else if (isShip) {
+        genericDurs = { 1u, 2u, 4u, 8u, 12u };
+    } else if (isBird || isSpider || isSwing) {
+        genericDurs = { 2u, 4u };
+    } else if (isRobot) {
+        genericDurs = { 2u, 6u, 14u, 26u, 45u, 70u };
+    } else {
+        genericDurs = { 2u, 4u, 8u, 14u, 24u, 36u };
+    }
+
     for (uint32_t t = 0; t < horizon; t += 2) {
-        for (uint32_t dur : { 2u, 4u, 8u, 14u, 24u, 36u }) {
+        for (uint32_t dur : genericDurs) {
             singleJumpList.push_back(makeSingleTap(t, dur));
         }
     }
 
-    for (uint32_t t1 = 0; t1 < horizon / 2; t1 += 4) {
-        for (uint32_t gap : { 6u, 12u, 18u }) {
+    for (uint32_t t1 = 0; t1 < horizon; t1 += 4) {
+        for (uint32_t gap : { 6u, 12u, 18u, 26u }) {
             if (t1 + gap < horizon) {
-                doubleTapList.push_back(makeDoubleTap(t1, 3, t1 + gap, 3));
+                uint32_t d1 = genericDurs.front();
+                uint32_t d2 = genericDurs.size() > 1 ? genericDurs[1] : d1;
+                doubleTapList.push_back(makeDoubleTap(t1, d1, t1 + gap, d2));
             }
         }
     }
 
-    // 4. Orbs (Jump rings & Dash rings) detection
-    float horizonDist = horizon * 1.5f * pSpeed;
+    // 5. Orbs (Jump rings & Dash rings) detection
     auto orbs = solver::HazardDetector::getOrbsInWindow(
         m_currentX - 10.0f, m_currentX + horizonDist,
         m_headlessPlayLayer ? m_headlessPlayLayer->m_objects : nullptr
     );
-    float speedRatio = 1.3f * pSpeed;
-    if (speedRatio < 0.2f) speedRatio = 1.3f;
 
     for (auto obj : orbs) {
         float dist = obj->getPositionX() - m_currentX;
@@ -528,15 +724,16 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
                     orbList.push_back(makeSingleTap(off, 4));
 
                     if (obj->m_objectType == GameObjectType::DashRing || obj->m_objectType == GameObjectType::GravityDashRing) {
-                        orbList.push_back(makeSingleTap(off, 24));
-                        orbList.push_back(makeSingleTap(off, 36));
+                        for (uint32_t dDur : { 12u, 20u, 30u, 42u, 55u, 70u, 90u, horizon }) {
+                            orbList.push_back(makeSingleTap(off, dDur));
+                        }
                     }
                 }
             }
         }
     }
 
-    // 5. Targeted mutations from previous wave failures
+    // 6. Targeted mutations from previous wave failures
     if (m_waveAttempt > 0 && !m_currentWaveFailures.empty()) {
         std::vector<BotCandidate> failures = m_currentWaveFailures;
         std::sort(failures.begin(), failures.end(), [](const BotCandidate& a, const BotCandidate& b) {
@@ -575,10 +772,10 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
 
     // Enforce Population Quotas
     size_t baselineQuota = std::max<size_t>(4, maxPop * 5 / 100);
-    size_t modeQuota = std::max<size_t>(16, maxPop * 20 / 100);
-    size_t orbQuota = std::max<size_t>(8, maxPop * 10 / 100);
-    size_t singleQuota = std::max<size_t>(25, maxPop * 30 / 100);
-    size_t doubleQuota = std::max<size_t>(12, maxPop * 15 / 100);
+    size_t modeQuota = std::max<size_t>(20, maxPop * 35 / 100);
+    size_t orbQuota = std::max<size_t>(10, maxPop * 15 / 100);
+    size_t singleQuota = std::max<size_t>(15, maxPop * 20 / 100);
+    size_t doubleQuota = std::max<size_t>(10, maxPop * 15 / 100);
     size_t mutationQuota = std::max<size_t>(8, maxPop * 10 / 100);
 
     auto addFromPool = [&](const std::vector<std::vector<Action>>& pool, size_t targetCount) {
@@ -611,7 +808,7 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
     addFromPool(doubleTapList, doubleQuota);
     addFromPool(mutationList, mutationQuota);
 
-    // 6. Stochastic temperature-scaled fill up to maxPop
+    // 7. Stochastic temperature-scaled fill up to maxPop
     std::uniform_int_distribution<uint32_t> tickDist(0, horizon - 1);
     std::uniform_int_distribution<int> boolDist(0, 1);
     while (swarm.size() < maxPop) {
@@ -681,7 +878,10 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
         m_headlessPlayLayer->update(fixedDt);
         m_ticksSampleCount++;
 
-        if (m_headlessPlayLayer->m_player1->m_isDead) {
+        bool candidateDied = m_headlessPlayLayer->m_playerDied ||
+                             m_headlessPlayLayer->m_player1->m_isDead ||
+                             (m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isDead);
+        if (candidateDied) {
             bot.died = true;
             bot.deathTick = step;
             bot.finalPos = m_headlessPlayLayer->m_player1->getPosition();
@@ -724,7 +924,10 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
             actualEnd++;
             m_ticksSampleCount++;
 
-            if (p1->m_isDead) {
+            bool extDied = m_headlessPlayLayer->m_playerDied ||
+                           p1->m_isDead ||
+                           (m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isDead);
+            if (extDied) {
                 bot.died = true;
                 bot.deathTick = actualEnd;
                 bot.finalPos = p1->getPosition();
@@ -775,11 +978,23 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
     }
 
     size_t nearbyObstacles = 0;
-    bot.clearance = solver::HazardDetector::calculateClearance(
+    float c1 = solver::HazardDetector::calculateClearance(
         bot.finalPos,
+        bot.p1Snapshot.isUpsideDown,
         m_headlessPlayLayer->m_objects,
         nearbyObstacles
     );
+    if (bot.hasPlayer2 && m_headlessPlayLayer->m_player2) {
+        float c2 = solver::HazardDetector::calculateClearance(
+            m_headlessPlayLayer->m_player2->getPosition(),
+            bot.p2Snapshot.isUpsideDown,
+            m_headlessPlayLayer->m_objects,
+            nearbyObstacles
+        );
+        bot.clearance = std::min(c1, c2);
+    } else {
+        bot.clearance = c1;
+    }
 
     bool reachedEndPosFinal = (m_headlessPlayLayer->getEndPosition().x > m_startX + 50.0f &&
                                bot.finalX >= m_headlessPlayLayer->getEndPosition().x - 10.0f);
@@ -790,7 +1005,9 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
     } else if (isFlying) {
         bot.landedSafely = (bot.clearance >= 5.0f);
     } else {
-        bot.landedSafely = p1->m_isOnGround;
+        bool p1Ground = p1->m_isOnGround;
+        bool p2Ground = !bot.hasPlayer2 || (m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isOnGround);
+        bot.landedSafely = p1Ground && p2Ground;
     }
 
     bot.fitnessScore = bot.finalX * 10.0f + bot.clearance;

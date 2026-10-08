@@ -66,6 +66,58 @@ bool HazardDetector::isPad(GameObject* obj) {
     }
 }
 
+bool HazardDetector::isPortal(GameObject* obj) {
+    if (!obj) return false;
+    auto type = obj->m_objectType;
+    switch (type) {
+        case GameObjectType::CubePortal:
+        case GameObjectType::ShipPortal:
+        case GameObjectType::BallPortal:
+        case GameObjectType::UfoPortal:
+        case GameObjectType::WavePortal:
+        case GameObjectType::RobotPortal:
+        case GameObjectType::SpiderPortal:
+        case GameObjectType::SwingPortal:
+        case GameObjectType::NormalGravityPortal:
+        case GameObjectType::InverseGravityPortal:
+        case GameObjectType::GravityTogglePortal:
+        case GameObjectType::RegularSizePortal:
+        case GameObjectType::MiniSizePortal:
+        case GameObjectType::DualPortal:
+        case GameObjectType::SoloPortal:
+        case GameObjectType::TeleportPortal:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool HazardDetector::isGamemodePortal(GameObject* obj) {
+    if (!obj) return false;
+    auto type = obj->m_objectType;
+    switch (type) {
+        case GameObjectType::CubePortal:
+        case GameObjectType::ShipPortal:
+        case GameObjectType::BallPortal:
+        case GameObjectType::UfoPortal:
+        case GameObjectType::WavePortal:
+        case GameObjectType::RobotPortal:
+        case GameObjectType::SpiderPortal:
+        case GameObjectType::SwingPortal:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool HazardDetector::isGravityPortal(GameObject* obj) {
+    if (!obj) return false;
+    auto type = obj->m_objectType;
+    return (type == GameObjectType::NormalGravityPortal ||
+            type == GameObjectType::InverseGravityPortal ||
+            type == GameObjectType::GravityTogglePortal);
+}
+
 void HazardDetector::buildIndex(cocos2d::CCArray* objects) {
     clearIndex();
     if (!objects) return;
@@ -86,6 +138,10 @@ void HazardDetector::buildIndex(cocos2d::CCArray* objects) {
         if (isOrb(obj)) {
             s_orbBuckets[bucket].push_back(obj);
         }
+
+        if (isPortal(obj)) {
+            s_portalBuckets[bucket].push_back(obj);
+        }
     }
     s_hasIndex = true;
 }
@@ -94,16 +150,19 @@ void HazardDetector::clearIndex() {
     s_hazardBuckets.clear();
     s_solidBuckets.clear();
     s_orbBuckets.clear();
+    s_portalBuckets.clear();
     s_hasIndex = false;
 }
 
 float HazardDetector::calculateClearance(
     const cocos2d::CCPoint& playerPos,
+    bool isUpsideDown,
     cocos2d::CCArray* objects,
     size_t& nearbyObstacleCountOut
 ) {
     nearbyObstacleCountOut = 0;
-    float minDistanceSq = MAX_CLEARANCE * MAX_CLEARANCE;
+    float minHazardDistSq = MAX_CLEARANCE * MAX_CLEARANCE;
+    float minSolidDistSq = MAX_CLEARANCE * MAX_CLEARANCE;
 
     auto checkList = [&](const std::vector<GameObject*>& list, bool isHazard) {
         for (GameObject* obj : list) {
@@ -113,17 +172,36 @@ float HazardDetector::calculateClearance(
             float dyCenter = objPos.y - playerPos.y;
 
             if (std::abs(dxCenter) <= EVALUATION_RADIUS_X && std::abs(dyCenter) <= EVALUATION_RADIUS_Y) {
-                if (dxCenter >= -25.0f) {
-                    nearbyObstacleCountOut++;
-                }
-                float dx = std::max(0.0f, std::abs(dxCenter) - 15.0f);
-                float dy = std::max(0.0f, std::abs(dyCenter) - 15.0f);
-                float distSq = dx * dx + dy * dy;
                 if (isHazard) {
-                    distSq *= 0.85f;
-                }
-                if (distSq < minDistanceSq) {
-                    minDistanceSq = distSq;
+                    if (dxCenter >= -25.0f) {
+                        nearbyObstacleCountOut++;
+                    }
+                    float dx = std::max(0.0f, std::abs(dxCenter) - 15.0f);
+                    float dy = std::max(0.0f, std::abs(dyCenter) - 15.0f);
+                    float distSq = (dx * dx + dy * dy) * 0.85f;
+                    if (distSq < minHazardDistSq) {
+                        minHazardDistSq = distSq;
+                    }
+                } else {
+                    // Solid blocks
+                    // Exclude the supporting surface directly underneath player (or above if upside-down)
+                    if (!isUpsideDown && dyCenter <= -8.0f && std::abs(dxCenter) <= 18.0f) {
+                        continue; // Standing on supporting floor
+                    }
+                    if (isUpsideDown && dyCenter >= 8.0f && std::abs(dxCenter) <= 18.0f) {
+                        continue; // Running on supporting ceiling
+                    }
+
+                    // Count solid walls ahead or crush ceilings
+                    if (dxCenter >= -10.0f) {
+                        nearbyObstacleCountOut++;
+                    }
+                    float dx = std::max(0.0f, std::abs(dxCenter) - 15.0f);
+                    float dy = std::max(0.0f, std::abs(dyCenter) - 15.0f);
+                    float distSq = dx * dx + dy * dy;
+                    if (distSq < minSolidDistSq) {
+                        minSolidDistSq = distSq;
+                    }
                 }
             }
         }
@@ -143,7 +221,8 @@ float HazardDetector::calculateClearance(
                 checkList(itS->second, false);
             }
         }
-        return std::sqrt(minDistanceSq);
+        float minOverallSq = std::min(minHazardDistSq, minSolidDistSq);
+        return std::sqrt(minOverallSq);
     }
 
     if (!objects) return MAX_CLEARANCE;
@@ -155,26 +234,13 @@ float HazardDetector::calculateClearance(
         bool isHaz = isHazardObject(obj);
         bool isSol = isSolidObject(obj);
         if (isHaz || isSol) {
-            cocos2d::CCPoint objPos = obj->getPosition();
-            float dxCenter = objPos.x - playerPos.x;
-            float dyCenter = objPos.y - playerPos.y;
-
-            if (std::abs(dxCenter) <= EVALUATION_RADIUS_X && std::abs(dyCenter) <= EVALUATION_RADIUS_Y) {
-                if (dxCenter >= -25.0f) {
-                    nearbyObstacleCountOut++;
-                }
-                float dx = std::max(0.0f, std::abs(dxCenter) - 15.0f);
-                float dy = std::max(0.0f, std::abs(dyCenter) - 15.0f);
-                float distSq = dx * dx + dy * dy;
-                if (isHaz) distSq *= 0.85f;
-                if (distSq < minDistanceSq) {
-                    minDistanceSq = distSq;
-                }
-            }
+            std::vector<GameObject*> singleList = { obj };
+            checkList(singleList, isHaz);
         }
     }
 
-    return std::sqrt(minDistanceSq);
+    float minOverallSq = std::min(minHazardDistSq, minSolidDistSq);
+    return std::sqrt(minOverallSq);
 }
 
 std::vector<GameObject*> HazardDetector::getOrbsInWindow(
@@ -222,6 +288,45 @@ std::vector<GameObject*> HazardDetector::getInteractablesInWindow(
     cocos2d::CCArray* objects
 ) {
     return getOrbsInWindow(minX, maxX, objects);
+}
+
+std::vector<GameObject*> HazardDetector::getPortalsInWindow(
+    float minX,
+    float maxX,
+    cocos2d::CCArray* objects
+) {
+    std::vector<GameObject*> result;
+    if (s_hasIndex) {
+        int minBucket = static_cast<int>(std::floor(minX / BUCKET_WIDTH));
+        int maxBucket = static_cast<int>(std::floor(maxX / BUCKET_WIDTH));
+
+        for (int b = minBucket; b <= maxBucket; ++b) {
+            auto it = s_portalBuckets.find(b);
+            if (it == s_portalBuckets.end()) continue;
+
+            for (GameObject* obj : it->second) {
+                if (!obj) continue;
+                float ox = obj->getPositionX();
+                if (ox >= minX && ox <= maxX) {
+                    result.push_back(obj);
+                }
+            }
+        }
+        return result;
+    }
+
+    if (!objects) return result;
+    for (unsigned int i = 0; i < objects->count(); ++i) {
+        auto obj = geode::cast::typeinfo_cast<GameObject*>(objects->objectAtIndex(i));
+        if (!obj) continue;
+        if (isPortal(obj)) {
+            float ox = obj->getPositionX();
+            if (ox >= minX && ox <= maxX) {
+                result.push_back(obj);
+            }
+        }
+    }
+    return result;
 }
 
 } // namespace solver

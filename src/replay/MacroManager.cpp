@@ -48,6 +48,67 @@ void MacroManager::saveMacroForLevel(int levelID, const std::string& levelName, 
         m_nameMacros[levelName] = actions;
     }
     setMacro(actions);
+
+    if (!actions.empty()) {
+        std::string cleanName = sanitizeLevelName(levelName);
+        if (cleanName.empty()) cleanName = "Level-" + std::to_string(levelID);
+
+        float duration = static_cast<float>(actions.back().tick) / 240.0f;
+        std::stringstream ss;
+        ss << "{\n";
+        ss << "  \"author\": \"LevelSolver\",\n";
+        ss << "  \"description\": \"Solved by LevelSolver Autonomous AI\",\n";
+        ss << "  \"duration\": " << duration << ",\n";
+        ss << "  \"gameVersion\": 22081,\n";
+        ss << "  \"framerate\": 240,\n";
+        ss << "  \"seed\": 1337,\n";
+        ss << "  \"coins\": 0,\n";
+        ss << "  \"ldm\": false,\n";
+        ss << "  \"platformer\": false,\n";
+        ss << "  \"bot\": {\n";
+        ss << "    \"name\": \"LevelSolver\",\n";
+        ss << "    \"version\": \"2.0\"\n";
+        ss << "  },\n";
+        ss << "  \"level\": {\n";
+        ss << "    \"id\": " << levelID << ",\n";
+        ss << "    \"name\": \"" << cleanName << "\"\n";
+        ss << "  },\n";
+        ss << "  \"inputs\": [\n";
+        for (size_t i = 0; i < actions.size(); ++i) {
+            const auto& act = actions[i];
+            ss << "    { \"frame\": " << act.tick
+               << ", \"button\": " << act.button
+               << ", \"btn\": " << act.button
+               << ", \"player2\": " << (act.player2 ? "true" : "false")
+               << ", \"p2\": " << (act.player2 ? "true" : "false")
+               << ", \"down\": " << (act.down ? "true" : "false") << " }";
+            if (i + 1 < actions.size()) {
+                ss << ",";
+            }
+            ss << "\n";
+        }
+        ss << "  ]\n";
+        ss << "}\n";
+
+        std::string jsonStr = ss.str();
+        std::error_code ec;
+
+        std::filesystem::path dir1 = geode::dirs::getGameDir() / "replays";
+        std::filesystem::create_directories(dir1, ec);
+        std::ofstream out1(dir1 / (cleanName + "-macro.json"));
+        if (out1.is_open()) {
+            out1 << jsonStr;
+            out1.close();
+        }
+
+        std::filesystem::path dir2 = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Geometry Dash\\replays";
+        std::filesystem::create_directories(dir2, ec);
+        std::ofstream out2(dir2 / (cleanName + "-macro.json"));
+        if (out2.is_open()) {
+            out2 << jsonStr;
+            out2.close();
+        }
+    }
 }
 
 bool MacroManager::hasMacroForLevel(int levelID, const std::string& levelName) const {

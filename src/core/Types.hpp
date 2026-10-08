@@ -72,6 +72,7 @@ struct PlayerSnapshot {
     bool isSpider = false;
     bool isSwing = false;
     bool isDashing = false;
+    bool isMini = false;
     float playerSpeed = 1.0f;
 
     void capture(PlayerObject* player) {
@@ -91,6 +92,7 @@ struct PlayerSnapshot {
         isSpider = player->m_isSpider;
         isSwing = player->m_isSwing;
         isDashing = player->m_isDashing;
+        isMini = player->m_isMini;
         playerSpeed = player->m_playerSpeed;
     }
 
@@ -111,6 +113,7 @@ struct PlayerSnapshot {
         player->m_isSpider = isSpider;
         player->m_isSwing = isSwing;
         player->m_isDashing = isDashing;
+        player->m_isMini = isMini;
         player->m_playerSpeed = playerSpeed;
     }
 };
