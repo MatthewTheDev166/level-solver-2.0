@@ -72,6 +72,7 @@ struct PlayerSnapshot {
     bool isSpider = false;
     bool isSwing = false;
     bool isDashing = false;
+    float vehicleSize = 1.0f;
     bool isMini = false;
     float playerSpeed = 1.0f;
 
@@ -92,7 +93,8 @@ struct PlayerSnapshot {
         isSpider = player->m_isSpider;
         isSwing = player->m_isSwing;
         isDashing = player->m_isDashing;
-        isMini = player->m_isMini;
+        vehicleSize = player->m_vehicleSize;
+        isMini = (vehicleSize > 0.0f && vehicleSize < 0.85f);
         playerSpeed = player->m_playerSpeed;
     }
 
@@ -113,7 +115,7 @@ struct PlayerSnapshot {
         player->m_isSpider = isSpider;
         player->m_isSwing = isSwing;
         player->m_isDashing = isDashing;
-        player->m_isMini = isMini;
+        if (vehicleSize > 0.0f) player->m_vehicleSize = vehicleSize;
         player->m_playerSpeed = playerSpeed;
     }
 };

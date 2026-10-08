@@ -268,7 +268,7 @@ std::vector<BotCandidate> SwarmSolver::generateSwarm(uint32_t startTick, uint32_
         isSpider = p->m_isSpider;
         isSwing = p->m_isSwing;
         isUpsideDown = p->m_isUpsideDown;
-        isMini = p->m_isMini;
+        isMini = (p->m_vehicleSize > 0.0f && p->m_vehicleSize < 0.85f);
         if (p->m_playerSpeed > 0.1f) pSpeed = p->m_playerSpeed;
     }
 
