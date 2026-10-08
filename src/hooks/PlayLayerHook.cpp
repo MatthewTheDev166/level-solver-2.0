@@ -116,14 +116,6 @@ class $modify(SolverPlayLayer, PlayLayer) {
         PlayLayer::playPlatformerEndAnimationToPos(position, instant);
     }
 
-    void activateEndTrigger(int targetID, bool reverse, bool lockPlayerY) {
-        if (SwarmSolver::get().isHeadlessSimulating()) {
-            this->m_hasCompletedLevel = true;
-            return;
-        }
-        PlayLayer::activateEndTrigger(targetID, reverse, lockPlayerY);
-    }
-
     void checkForEnd() {
         if (SwarmSolver::get().isHeadlessSimulating()) {
             if (this->m_player1 && this->m_player1->getPositionX() >= this->getEndPosition().x - 10.0f) {
