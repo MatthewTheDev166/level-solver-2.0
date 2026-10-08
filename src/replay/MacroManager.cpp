@@ -1,5 +1,9 @@
 #include "MacroManager.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
+#include "../solver/SwarmSolver.hpp"
+
+#include <Geode/binding/GameLevelManager.hpp>
+#include <Geode/binding/LocalLevelManager.hpp>
 
 #include <fstream>
 #include <filesystem>
@@ -18,6 +22,15 @@ static std::string sanitizeLevelName(const std::string& name) {
     return clean;
 }
 
+PlayLayer* MacroManager::getActivePlayLayer() {
+    auto pl = PlayLayer::get();
+    if (pl && pl == m_playLayer && pl != SwarmSolver::get().getHeadlessPlayLayer()) {
+        return pl;
+    }
+    m_playLayer = nullptr;
+    return nullptr;
+}
+
 void MacroManager::onLevelEntered(PlayLayer* playLayer) {
     m_playLayer = playLayer;
     m_currentActionIndex = 0;
@@ -32,6 +45,7 @@ void MacroManager::onLevelExited() {
 
 void MacroManager::setMacro(const std::vector<Action>& actions) {
     m_actions = actions;
+    m_hasRecordedMacro = true;
     std::stable_sort(m_actions.begin(), m_actions.end(), [](const Action& a, const Action& b) {
         if (a.tick != b.tick) return a.tick < b.tick;
         return !a.down && b.down;
@@ -114,11 +128,11 @@ void MacroManager::saveMacroForLevel(int levelID, const std::string& levelName, 
 bool MacroManager::hasMacroForLevel(int levelID, const std::string& levelName) const {
     if (levelID > 0) {
         auto it = m_levelMacros.find(levelID);
-        if (it != m_levelMacros.end() && !it->second.empty()) return true;
+        if (it != m_levelMacros.end() && (!it->second.empty() || m_hasRecordedMacro)) return true;
     }
     if (!levelName.empty()) {
         auto it = m_nameMacros.find(levelName);
-        if (it != m_nameMacros.end() && !it->second.empty()) return true;
+        if (it != m_nameMacros.end() && (!it->second.empty() || m_hasRecordedMacro)) return true;
     }
 
     std::string clean = sanitizeLevelName(levelName);
@@ -134,14 +148,14 @@ bool MacroManager::hasMacroForLevel(int levelID, const std::string& levelName) c
 bool MacroManager::loadMacroForLevel(int levelID, const std::string& levelName) {
     if (levelID > 0) {
         auto it = m_levelMacros.find(levelID);
-        if (it != m_levelMacros.end() && !it->second.empty()) {
+        if (it != m_levelMacros.end() && (!it->second.empty() || m_hasRecordedMacro)) {
             setMacro(it->second);
             return true;
         }
     }
     if (!levelName.empty()) {
         auto it = m_nameMacros.find(levelName);
-        if (it != m_nameMacros.end() && !it->second.empty()) {
+        if (it != m_nameMacros.end() && (!it->second.empty() || m_hasRecordedMacro)) {
             setMacro(it->second);
             return true;
         }
@@ -185,28 +199,40 @@ bool MacroManager::loadMacroForLevel(int levelID, const std::string& levelName) 
 }
 
 void MacroManager::startReplay(GJGameLevel* level) {
-    if (m_actions.empty()) {
+    if (m_actions.empty() && !m_hasRecordedMacro) {
         geode::Notification::create("No macro recorded yet!", geode::NotificationIcon::Warning)->show();
         return;
     }
 
-    if (level) {
-        if (level->isPlatformer()) {
+    auto activePL = getActivePlayLayer();
+    GJGameLevel* targetLevel = level ? level : (activePL ? activePL->m_level : nullptr);
+
+    if (targetLevel) {
+        if (targetLevel->isPlatformer()) {
             geode::Notification::create("Platformer levels are not supported by Level Solver.", geode::NotificationIcon::Warning)->show();
             return;
         }
-        if (level->m_twoPlayerMode) {
+        if (targetLevel->m_twoPlayerMode) {
             geode::Notification::create("2-Player levels are not supported by Level Solver.", geode::NotificationIcon::Warning)->show();
             return;
         }
-    } else if (m_playLayer && m_playLayer->m_level) {
-        if (m_playLayer->m_level->isPlatformer()) {
-            geode::Notification::create("Platformer levels are not supported by Level Solver.", geode::NotificationIcon::Warning)->show();
-            return;
+
+        if (targetLevel->m_levelString.empty()) {
+            if (auto llm = LocalLevelManager::sharedState()) {
+                auto str = llm->getMainLevelString(targetLevel->m_levelID.value());
+                if (!str.empty()) {
+                    targetLevel->m_levelString = str;
+                }
+            }
         }
-        if (m_playLayer->m_level->m_twoPlayerMode) {
-            geode::Notification::create("2-Player levels are not supported by Level Solver.", geode::NotificationIcon::Warning)->show();
-            return;
+        if (targetLevel->m_levelString.empty()) {
+            if (auto glm = GameLevelManager::sharedState()) {
+                if (auto mainLvl = glm->getMainLevel(targetLevel->m_levelID.value(), false)) {
+                    if (!mainLvl->m_levelString.empty()) {
+                        targetLevel->m_levelString = mainLvl->m_levelString;
+                    }
+                }
+            }
         }
     }
 
@@ -216,13 +242,15 @@ void MacroManager::startReplay(GJGameLevel* level) {
 
     CheatAPIIntegrator::notifyCheatStarted();
 
-    if (m_playLayer) {
-        m_playLayer->resetLevel();
+    if (activePL) {
+        activePL->resetLevel();
         geode::Notification::create("Replaying solution in GD...", geode::NotificationIcon::Info)->show();
-    } else if (level) {
+    } else if (targetLevel) {
         geode::Notification::create("Launching replay...", geode::NotificationIcon::Info)->show();
-        auto scene = PlayLayer::scene(level, false, false);
+        auto scene = PlayLayer::scene(targetLevel, false, false);
         cocos2d::CCDirector::sharedDirector()->replaceScene(scene);
+    } else {
+        geode::Notification::create("No level available to replay!", geode::NotificationIcon::Warning)->show();
     }
 }
 
@@ -230,9 +258,7 @@ void MacroManager::stopReplay() {
     m_replayActive = false;
     m_currentActionIndex = 0;
     m_replayTick = 0;
-    if (!m_playLayer) {
-        CheatAPIIntegrator::notifyCheatEnded();
-    }
+    CheatAPIIntegrator::notifyCheatEnded();
 }
 
 void MacroManager::stepReplay(PlayLayer* playLayer) {
@@ -260,19 +286,20 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
 }
 
 std::string MacroManager::exportActiveMacro(GJGameLevel* level) {
-    if (m_actions.empty()) {
+    if (m_actions.empty() && !m_hasRecordedMacro) {
         geode::Notification::create("No macro available to export!", geode::NotificationIcon::Warning)->show();
         return "";
     }
 
     int levelID = 0;
     std::string levelName = "Unnamed";
+    auto activePL = getActivePlayLayer();
     if (level) {
         levelID = level->m_levelID.value();
         levelName = level->m_levelName;
-    } else if (m_playLayer && m_playLayer->m_level) {
-        levelID = m_playLayer->m_level->m_levelID.value();
-        levelName = m_playLayer->m_level->m_levelName;
+    } else if (activePL && activePL->m_level) {
+        levelID = activePL->m_level->m_levelID.value();
+        levelName = activePL->m_level->m_levelName;
     }
 
     std::string cleanName = sanitizeLevelName(levelName);

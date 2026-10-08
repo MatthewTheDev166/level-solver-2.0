@@ -36,6 +36,8 @@ public:
 
     std::string exportActiveMacro(GJGameLevel* level = nullptr);
 
+    PlayLayer* getActivePlayLayer();
+
 private:
     MacroManager() = default;
 
@@ -45,6 +47,7 @@ private:
     uint32_t m_replayTick = 0;
     bool m_replayActive = false;
     bool m_isInjectingInput = false;
+    bool m_hasRecordedMacro = false;
 
     std::unordered_map<int, std::vector<Action>> m_levelMacros;
     std::unordered_map<std::string, std::vector<Action>> m_nameMacros;
