@@ -95,9 +95,10 @@ void SwarmSolver::start(GJGameLevel* level) {
     }
     if (level->m_levelString.empty()) {
         if (auto glm = GameLevelManager::sharedState()) {
-            auto str = glm->getMainLevelString(level->m_levelID.value());
-            if (!str.empty()) {
-                level->m_levelString = str;
+            if (auto mainLvl = glm->getMainLevel(level->m_levelID.value(), false)) {
+                if (!mainLvl->m_levelString.empty()) {
+                    level->m_levelString = mainLvl->m_levelString;
+                }
             }
         }
     }
