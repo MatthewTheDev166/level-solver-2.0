@@ -159,9 +159,8 @@ void SwarmSolver::start(GJGameLevel* level) {
     m_headlessPlayLayer->m_hasCompletedLevel = false;
     solver::HazardDetector::buildIndex(m_headlessPlayLayer->m_objects);
 
-
-    calculateTrueLevelLength();
     captureInitialAnchor();
+    calculateTrueLevelLength();
 
     m_isSolving = true;
     m_telemetry.status = SolverStatus::Searching;
@@ -211,9 +210,11 @@ void SwarmSolver::captureInitialAnchor() {
     initial.tick = 0;
     initial.x = m_startX;
     initial.p1Snapshot.capture(m_headlessPlayLayer->m_player1);
-    if (m_headlessPlayLayer->m_player2) {
+    if (m_headlessPlayLayer->m_isDualMode && m_headlessPlayLayer->m_player2) {
         initial.p2Snapshot.capture(m_headlessPlayLayer->m_player2);
         initial.hasPlayer2 = true;
+    } else {
+        initial.hasPlayer2 = false;
     }
     initial.actionPrefixCount = 0;
 
@@ -878,9 +879,10 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
         m_headlessPlayLayer->update(fixedDt);
         m_ticksSampleCount++;
 
+        bool isDual = m_headlessPlayLayer->m_isDualMode;
         bool candidateDied = m_headlessPlayLayer->m_playerDied ||
                              m_headlessPlayLayer->m_player1->m_isDead ||
-                             (m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isDead);
+                             (isDual && m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isDead);
         if (candidateDied) {
             bot.died = true;
             bot.deathTick = step;
@@ -901,9 +903,11 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
             bot.landedSafely = true;
             bot.actualEndTick = step;
             bot.p1Snapshot.capture(m_headlessPlayLayer->m_player1);
-            if (m_headlessPlayLayer->m_player2) {
+            if (isDual && m_headlessPlayLayer->m_player2) {
                 bot.p2Snapshot.capture(m_headlessPlayLayer->m_player2);
                 bot.hasPlayer2 = true;
+            } else {
+                bot.hasPlayer2 = false;
             }
             bot.clearance = solver::HazardDetector::MAX_CLEARANCE;
             bot.fitnessScore = bot.finalX * 10.0f + bot.clearance + 100000.0f;
@@ -924,9 +928,10 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
             actualEnd++;
             m_ticksSampleCount++;
 
+            bool isDualExt = m_headlessPlayLayer->m_isDualMode;
             bool extDied = m_headlessPlayLayer->m_playerDied ||
                            p1->m_isDead ||
-                           (m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isDead);
+                           (isDualExt && m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isDead);
             if (extDied) {
                 bot.died = true;
                 bot.deathTick = actualEnd;
@@ -947,9 +952,11 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
                 bot.landedSafely = true;
                 bot.actualEndTick = actualEnd;
                 bot.p1Snapshot.capture(p1);
-                if (m_headlessPlayLayer->m_player2) {
+                if (isDualExt && m_headlessPlayLayer->m_player2) {
                     bot.p2Snapshot.capture(m_headlessPlayLayer->m_player2);
                     bot.hasPlayer2 = true;
+                } else {
+                    bot.hasPlayer2 = false;
                 }
                 bot.clearance = solver::HazardDetector::MAX_CLEARANCE;
                 bot.fitnessScore = bot.finalX * 10.0f + bot.clearance + 100000.0f;
@@ -972,9 +979,12 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
     bot.finalPos = p1->getPosition();
     bot.finalX = bot.finalPos.x;
     bot.p1Snapshot.capture(p1);
-    if (m_headlessPlayLayer->m_player2) {
+    bool isDualFinal = m_headlessPlayLayer->m_isDualMode;
+    if (isDualFinal && m_headlessPlayLayer->m_player2) {
         bot.p2Snapshot.capture(m_headlessPlayLayer->m_player2);
         bot.hasPlayer2 = true;
+    } else {
+        bot.hasPlayer2 = false;
     }
 
     size_t nearbyObstacles = 0;
@@ -984,7 +994,7 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
         m_headlessPlayLayer->m_objects,
         nearbyObstacles
     );
-    if (bot.hasPlayer2 && m_headlessPlayLayer->m_player2) {
+    if (bot.hasPlayer2 && isDualFinal && m_headlessPlayLayer->m_player2) {
         float c2 = solver::HazardDetector::calculateClearance(
             m_headlessPlayLayer->m_player2->getPosition(),
             bot.p2Snapshot.isUpsideDown,
@@ -1006,7 +1016,7 @@ void SwarmSolver::simulateCandidate(BotCandidate& bot, uint32_t startTick, uint3
         bot.landedSafely = (bot.clearance >= 5.0f);
     } else {
         bool p1Ground = p1->m_isOnGround;
-        bool p2Ground = !bot.hasPlayer2 || (m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isOnGround);
+        bool p2Ground = !bot.hasPlayer2 || !isDualFinal || (m_headlessPlayLayer->m_player2 && m_headlessPlayLayer->m_player2->m_isOnGround);
         bot.landedSafely = p1Ground && p2Ground;
     }
 

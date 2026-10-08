@@ -14,6 +14,11 @@ class $modify(SolverPlayerObject, PlayerObject) {
 
     void playerDestroyed(bool noEffects) {
         if (SwarmSolver::get().isHeadlessSimulating()) {
+            if (auto pl = SwarmSolver::get().getHeadlessPlayLayer()) {
+                if (this == pl->m_player2 && !pl->m_isDualMode) {
+                    return; // Ignore inactive player 2 destruction in single player mode
+                }
+            }
             this->m_isDead = true;
             return;
         }
@@ -95,8 +100,13 @@ class $modify(SolverPlayLayer, PlayLayer) {
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         if (SwarmSolver::get().isHeadlessSimulating() || this == SwarmSolver::get().getHeadlessPlayLayer()) {
-            // 1. Ignore spawn anti-cheat spike
-            if (object && (object == this->m_anticheatSpike || (object->m_objectID == 8 && object->getPositionX() <= 30.0f))) {
+            // In single player mode, ignore any destruction of player 2
+            if (player && player == this->m_player2 && !this->m_isDualMode) {
+                return;
+            }
+
+            // Ignore spawn anti-cheat spike or any hazard at spawn (x <= 30.0f)
+            if (object && (object == this->m_anticheatSpike || object->getPositionX() <= 30.0f)) {
                 return;
             }
 
@@ -134,10 +144,12 @@ class $modify(SolverPlayLayer, PlayLayer) {
 
     void checkForEnd() {
         if (SwarmSolver::get().isHeadlessSimulating() || this == SwarmSolver::get().getHeadlessPlayLayer()) {
-            if (this->m_player1 && this->m_player1->getPositionX() >= this->getEndPosition().x - 10.0f) {
+            float endX = this->getEndPosition().x;
+            if (endX > 50.0f && this->m_player1 && this->m_player1->getPositionX() >= endX - 10.0f) {
                 this->m_hasCompletedLevel = true;
                 return;
             }
+            return;
         }
         PlayLayer::checkForEnd();
     }
